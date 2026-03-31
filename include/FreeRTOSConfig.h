@@ -55,6 +55,7 @@
 #define configUSE_EVENT_GROUPS                  1
 
 #define INCLUDE_xTimerPendFunctionCall          1
-                                                    
+      
+#define configRUN_FREERTOS_SECURE_ONLY          1
 
 #endif
