@@ -4,6 +4,7 @@
 
 #include <cstdio>
 
+#include "console.h"
 
 #define A 0
 #define B 1
@@ -54,108 +55,108 @@ void ReadButtonTask(void *param) {
         if (!ButtonState.prevState && ButtonState.curState) {
             counter++;
             counter %= 10;
-            set_pins(counter);
+            //set_pins(counter);
         }
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
 
-void set_pins(uint8_t num) {
-    switch (num) {
-        case 0:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_ON);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_OFF);
-        break;
-    case 1:
-        gpio_put(A,GPIO_OFF);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_OFF);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_OFF);
-        gpio_put(G,GPIO_OFF);
-        break;
-    case 2:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_OFF);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_ON);
-        gpio_put(F,GPIO_OFF);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 3:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_OFF);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 4:
-        gpio_put(A,GPIO_OFF);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_OFF);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 5:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_OFF);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 6:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_OFF);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_ON);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 7:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_OFF);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_OFF);
-        gpio_put(G,GPIO_OFF);
-        break;
-    case 8:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_ON);
-        gpio_put(E,GPIO_ON);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_ON);
-        break;
-    case 9:
-        gpio_put(A,GPIO_ON);
-        gpio_put(B,GPIO_ON);
-        gpio_put(C,GPIO_ON);
-        gpio_put(D,GPIO_OFF);
-        gpio_put(E,GPIO_OFF);
-        gpio_put(F,GPIO_ON);
-        gpio_put(G,GPIO_ON);
-        break;
-    default:
-        break;
-    }
-}
+// void set_pins(uint8_t num) {
+//     switch (num) {
+//         case 0:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_ON);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_OFF);
+//         break;
+//     case 1:
+//         gpio_put(A,GPIO_OFF);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_OFF);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_OFF);
+//         gpio_put(G,GPIO_OFF);
+//         break;
+//     case 2:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_OFF);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_ON);
+//         gpio_put(F,GPIO_OFF);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 3:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_OFF);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 4:
+//         gpio_put(A,GPIO_OFF);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_OFF);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 5:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_OFF);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 6:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_OFF);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_ON);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 7:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_OFF);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_OFF);
+//         gpio_put(G,GPIO_OFF);
+//         break;
+//     case 8:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_ON);
+//         gpio_put(E,GPIO_ON);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     case 9:
+//         gpio_put(A,GPIO_ON);
+//         gpio_put(B,GPIO_ON);
+//         gpio_put(C,GPIO_ON);
+//         gpio_put(D,GPIO_OFF);
+//         gpio_put(E,GPIO_OFF);
+//         gpio_put(F,GPIO_ON);
+//         gpio_put(G,GPIO_ON);
+//         break;
+//     default:
+//         break;
+//     }
+// }
 
 
 int main() {
