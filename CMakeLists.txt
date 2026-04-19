@@ -53,12 +53,14 @@ pico_set_program_version(OwlSatOS "0.1")
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
         hardware_pwm
+        hardware_flash
+        tinyusb_device
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
 )
 
-pico_enable_stdio_usb(OwlSatOS 1)
-pico_enable_stdio_uart(OwlSatOS 0)
+pico_enable_stdio_usb(OwlSatOS 0)
+pico_enable_stdio_uart(OwlSatOS 1)
 
 target_include_directories(OwlSatOS PRIVATE
         ./
