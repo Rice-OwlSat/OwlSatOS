@@ -1,3 +1,11 @@
+/**
+ * @file OwlSatOS.cpp
+ * @brief Entry point and core FreeRTOS tasks for OwlSatOS.
+ *
+ * Initialises GPIO, creates the board LED blink task and button-read task,
+ * then hands control to the FreeRTOS scheduler.
+ */
+
 #include <pico/stdlib.h>
 #include "FreeRTOS.h"
 #include "task.h"
@@ -6,20 +14,29 @@
 
 #include "console.h"
 
-#define A 0
-#define B 1
-#define C 2
-#define D 3
-#define E 4
-#define F 5
-#define G 6
+/** @defgroup seg7_pins 7-Segment Display GPIO Pins
+ *  GPIO pin assignments for the seven segments (A–G).
+ *  @{
+ */
+#define A 0 ///< Segment A — GPIO 0
+#define B 1 ///< Segment B — GPIO 1
+#define C 2 ///< Segment C — GPIO 2
+#define D 3 ///< Segment D — GPIO 3
+#define E 4 ///< Segment E — GPIO 4
+#define F 5 ///< Segment F — GPIO 5
+#define G 6 ///< Segment G — GPIO 6
+/** @} */
 
+#define GPIO_ON  1 ///< Logic high — drive GPIO pin high.
+#define GPIO_OFF 0 ///< Logic low  — drive GPIO pin low.
 
-#define GPIO_ON 1
-#define GPIO_OFF 0
-
+/** GPIO number of the on-board LED (PICO_DEFAULT_LED_PIN). */
 const int LED_PIN = PICO_DEFAULT_LED_PIN;
 
+/**
+ * @brief FreeRTOS task that blinks the on-board LED at 2 Hz (250 ms on/off).
+ * @param param Unused task parameter.
+ */
 void BoardLEDTask(void *param) {
     for (;;) {
         gpio_put(LED_PIN, GPIO_ON);
@@ -33,17 +50,33 @@ void BoardLEDTask(void *param) {
     }
 }
 
+/**
+ * @brief Tracks the current and previous debounce state of a GPIO button.
+ *
+ * Both fields are single-bit bitfields packed into one byte.
+ */
 struct state {
-    bool curState : 1;
-    bool prevState : 1;
+    bool curState  : 1; ///< Button level sampled this tick (true = pressed).
+    bool prevState : 1; ///< Button level sampled last tick.
 };
 
+/** Shared button state updated by ReadButtonTask. */
 state ButtonState{};
 
+/** Rolling counter incremented on each button press (wraps at 10). */
 uint8_t counter {0};
 
+/** @brief Drive the 7-segment display GPIOs for digit @p num (0–9). */
 void set_pins(uint8_t);
 
+/**
+ * @brief FreeRTOS task that polls GPIO 16 for button presses at 1 kHz.
+ *
+ * Detects rising and falling edges, prints press/release events, and
+ * increments the global counter (mod 10) on each press.
+ *
+ * @param param Unused task parameter.
+ */
 void ReadButtonTask(void *param) {
     for (;;) {
         ButtonState.prevState = ButtonState.curState;
@@ -159,6 +192,14 @@ void ReadButtonTask(void *param) {
 // }
 
 
+/**
+ * @brief Firmware entry point.
+ *
+ * Initialises stdio and all GPIO pins, then creates FreeRTOS tasks and
+ * starts the scheduler. Never returns.
+ *
+ * @return int Never reached.
+ */
 int main() {
     stdio_init_all();
 
