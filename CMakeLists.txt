@@ -1,43 +1,14 @@
-# == DO NOT EDIT THE FOLLOWING LINES for the Raspberry Pi Pico VS Code Extension to work ==
-if(WIN32)
-    set(USERHOME $ENV{USERPROFILE})
-else()
-    set(USERHOME $ENV{HOME})
-endif()
-set(sdkVersion 2.2.0)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
-set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
-    include(${picoVscode})
-endif()
-# ====================================================================================
 cmake_minimum_required(VERSION 3.13)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-if(WIN32)
-    set(USERHOME $ENV{USERPROFILE})
-else()
-    set(USERHOME $ENV{HOME})
-endif()
-set(sdkVersion 2.2.0)
-set(toolchainVersion 14_2_Rel1)
-set(picotoolVersion 2.2.0-a4)
-set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
-if (EXISTS ${picoVscode})
-    include(${picoVscode})
-endif()
-
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+message("PICO_TOOLCHAIN_PATH is ${PICO_TOOLCHAIN_PATH}")
 include(pico_sdk_import.cmake)
 
-# FreeRTOS
-set(FREERTOS_KERNEL_PATH ${CMAKE_CURRENT_LIST_DIR}/freertos)
-include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/FreeRTOS_Kernel_import.cmake)
 
 project(OwlSatOS C CXX ASM)
 
@@ -49,6 +20,10 @@ add_executable(OwlSatOS ${OWLSAT_SOURCES})
 
 pico_set_program_name(OwlSatOS "OwlSatOS")
 pico_set_program_version(OwlSatOS "0.1")
+
+# FreeRTOS
+set(FREERTOS_KERNEL_PATH ${CMAKE_CURRENT_LIST_DIR}/freertos)
+include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/FreeRTOS_Kernel_import.cmake)
 
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
@@ -68,3 +43,8 @@ target_include_directories(OwlSatOS PRIVATE
         include/)
 
 pico_add_extra_outputs(OwlSatOS)
+
+if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+    target_compile_options(OwlSatOS PRIVATE --target=arm-none-eabi -mcpu=cortex-m33 -mthumb -mfloat-abi=hard)
+endif ()
+

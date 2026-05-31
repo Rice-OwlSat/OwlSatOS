@@ -1,6 +1,7 @@
 build
-!.vscode/*
 .claude
 docs
 
+.vscode
 .idea
+CMakeUserPresets.json
