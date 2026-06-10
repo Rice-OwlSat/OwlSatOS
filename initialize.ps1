@@ -4,3 +4,5 @@ $output = & git submodule update --init --recursive
 if ($Error[0]) {
     Write-Output "Problem: $($output)"
 }
+
+New-Item -Name paths.cmake

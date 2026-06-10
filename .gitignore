@@ -5,3 +5,5 @@ docs
 .vscode
 .idea
 CMakeUserPresets.json
+
+paths.cmake
