@@ -1,0 +1,5 @@
+- [ ] Write `toolchain.cmake` — set `CMAKE_SYSTEM_NAME Generic`, point `CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER` explicitly at the ARM toolchain bin
+- [ ] Set sysroot to the correct `armv8m.main_hard_fp_unaligned_size` runtime directory
+- [ ] Pass `-DCMAKE_TOOLCHAIN_FILE` instead of bare compiler flags in CLion's CMake options
+- [ ] Verify `pico_sdk_init()` picks up the pre-configured compiler without triggering its own toolchain detection
+- [ ] Test a minimal build

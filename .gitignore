@@ -6,4 +6,5 @@ docs
 .idea
 CMakeUserPresets.json
 
-paths.cmake
+compile_settings.cmake
+settings.cmake

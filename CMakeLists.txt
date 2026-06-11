@@ -4,10 +4,14 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(PICO_BOARD pico2 CACHE STRING "Board type")
+set(PICO_BOARD mainboard CACHE STRING "Board type")
 
-message("PICO_TOOLCHAIN_PATH is ${PICO_TOOLCHAIN_PATH}")
-include(pico_sdk_import.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/settings.cmake)
+
+set(CMAKE_TOOLCHAIN_FILE ${CMAKE_CURRENT_LIST_DIR}/toolchain.cmake)
+
+
+include(${CMAKE_CURRENT_LIST_DIR}/pico_sdk_import.cmake)
 
 
 project(OwlSatOS C CXX ASM)

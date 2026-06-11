@@ -1,5 +1,5 @@
 {
-  "version": 6,
+  "version": 10,
   "cmakeMinimumRequired": {
     "major": 3,
     "minor": 23,
@@ -11,13 +11,8 @@
       "hidden": true,
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build",
-      "environment": {
-        "PICO_SDK_PATH": "$env{USERPROFILE}/.pico-sdk/sdk/2.2.0",
-        "PICO_TOOLCHAIN_PATH": "$env{USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1",
-        "PATH": "$env{USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1/bin;$env{PATH}"
-      },
+      "$comment": "All paths, compiler choice and board live in settings.cmake. Do NOT set PICO_SDK_PATH / PICO_TOOLCHAIN_PATH / PICO_BOARD here -- they would override settings.cmake via the environment/cache.",
       "cacheVariables": {
-        "PICO_BOARD": "pico2",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
