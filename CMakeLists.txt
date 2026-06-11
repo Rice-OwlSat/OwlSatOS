@@ -31,13 +31,13 @@ include(${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GC
 
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
-        hardware_pwm
+        #hardware_pwm
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
 )
 
-pico_enable_stdio_usb(OwlSatOS 1)
-pico_enable_stdio_uart(OwlSatOS 0)
+pico_enable_stdio_usb(OwlSatOS 0)
+pico_enable_stdio_uart(OwlSatOS 1)
 
 target_include_directories(OwlSatOS PRIVATE
         ./
@@ -48,7 +48,7 @@ target_include_directories(OwlSatOS PRIVATE
 
 pico_add_extra_outputs(OwlSatOS)
 
-if (CMAKE_C_COMPILER_ID MATCHES "Clang")
-    target_compile_options(OwlSatOS PRIVATE --target=arm-none-eabi -mcpu=cortex-m33 -mthumb -mfloat-abi=hard)
-endif ()
-
+# if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+#     target_compile_options(OwlSatOS PRIVATE --target=arm-none-eabi -mcpu=cortex-m33 -mthumb -mfloat-abi=hard)
+# endif ()
+#

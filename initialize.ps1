@@ -42,7 +42,7 @@ _setting(PICO_COMPILER_KIND "clang")
 _setting(ATFE_PATH "PATH/TO/ATfE-version-platform-architecture")
 # arm-none-eabi-gcc install root (used when PICO_COMPILER_KIND = gcc).
 # Leave blank to find arm-none-eabi-gcc on the system PATH.
-_setting(GCC_TOOLCHAIN_PATH "")
+_setting(GCC_TOOLCHAIN_PATH "PATH/TO/ARM-NONE-EABI-GCC")
 
 # --- SDK & libraries (machine-specific) --------------------------------------
 _setting(PICO_SDK_PATH "PATH/TO/pico-sdk-version")
