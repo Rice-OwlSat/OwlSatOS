@@ -52,3 +52,8 @@ Depends on the filesystem layer above being merged first.
 - Implement a serializer that packs sensor readings into frames
 - Add a telemetry transmit task that pulls from a FreeRTOS queue and sends frames over UART or the RF interface
 - Coordinate with the comms team on baud rate, framing, and packetization (COBS, SLIP, etc.) before writing the transmit path
+
+### TASK: Battery management
+- Poll battery
+- Hibernate if needed
+<!--TODO Figure out if battery is handled by hardware or software-->
