@@ -10,11 +10,6 @@
 **/
 #pragma once
 
-#define DIODE_PIN_1 5
-#define DIODE_PIN_2 6
-#define DIODE_PIN_3 7
-#define DIODE_PIN_4 8
-#define DIODE_PIN_5 9
-#define DIODE_PIN_6 10
-#define DIODE_PIN_7 11
-#define DIODE_PIN_8 12
+#define DIODE_PIN_DATA 0
+#define DIODE_PIN_CLOCK 1
+

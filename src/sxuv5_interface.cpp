@@ -11,7 +11,7 @@
 
 #include <pico/stdlib.h>
 #include <cstdint>
-#include <sxuv5.h>
+#include <OwlSat/sxuv5.h>
 #include <cstring>
 
 // Assuming 8 bit parallel, will change accordingly later
