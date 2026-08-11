@@ -27,10 +27,9 @@ namespace OwlSat {
     /// Smallest σ the fit will weight against, so one optimistic channel cannot dominate.
     constexpr float kSigmaFloor = 1.0e-9f;
 
-    /// A channel carries no usable information if it faulted or was disabled by ground.
+    /// A channel carries no usable information if it faulted, was disabled, or was unpowered.
     bool Usable(const FaceSample &sample) {
-      constexpr uint16_t kUnusable = SXUV5_FLAG_ADC_FAULT | SXUV5_FLAG_DISABLED;
-      return (sample.raw.flags & kUnusable) == 0 && Calibration(sample.raw.face).enabled;
+      return (sample.raw.flags & SXUV5_FLAGS_NO_DATA) == 0 && Calibration(sample.raw.face).enabled;
     }
 
     bool Lit(const FaceSample &sample) {
