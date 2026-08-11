@@ -16,7 +16,9 @@ approaches NIST transfer-standard grade.
   ideal for a faint near-DC signal. Reverse bias only buys bandwidth you don't need here.
 
 ## Front end (transimpedance amp)
-- I→V conversion: V_out = −I_ph · R_f. For 10 nA → 1 V, R_f = 100 MΩ.
+- I→V conversion: V_out = −I_ph · R_f. A sunlit face is expected to deliver ~1.3 nA (block
+  diagram, from the LISIRD TIMED SEE SSI instrument), so R_f = 1 GΩ puts it at ~1.3 V —
+  roughly half of the ADC's 2.5 V full scale.
 - That large R_f dictates the rest:
     - Op-amp input bias must be fA-class (electrometer/FET input) so I_bias ≪ I_ph.
     - Noise is set by Johnson noise of R_f (∝ √R_f) and op-amp e_n scaled by the noise gain
@@ -26,6 +28,14 @@ approaches NIST transfer-standard grade.
 - Dark current ~doubles per 8–10 °C; offset and drift fold straight into the radiometric error.
 
 ## Digitization
-Semultiplexer/analog switch, a variable-gain transimpedance amp (2 GPIOs on the RP2350 to select the gain), and an external ADC chip
+Five diodes reach one amplifier through coax and an analog multiplexer (3 GPIOs, MUXSEL), into a
+variable-gain transimpedance amp (2 GPIOs, GAINSEL → 4 gain steps), into an external ADC — an
+ADS7828, 8-channel 12-bit with an internal 2.5 V reference, on the shared I2C0 bus. The whole
+chain is downstream of one channel of a dual low-power switch (SENS_PWR), so it can be turned
+off entirely, and does not answer on the bus when it is.
+
+Because there is one mux and one amplifier for five diodes, the array is read sequentially: each
+face costs a channel change plus the front end's settling time. See
+`docs/internal/hardware_block_diagram.md` for the chain as drawn.
 
 

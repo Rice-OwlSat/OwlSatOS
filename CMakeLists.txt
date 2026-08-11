@@ -71,7 +71,7 @@ pico_set_program_version(OwlSatOS "0.1")
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
         hardware_pwm
-        hardware_spi
+        hardware_i2c
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
 )

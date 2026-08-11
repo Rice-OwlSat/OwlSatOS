@@ -34,32 +34,67 @@
 
 
 // ---------------------------------------------------------------------------
-// ADC  (TBC — docs/internal/sxuv5.md §6.4: part number, resolution and V_ref unconfirmed)
+// ADC — TI ADS7828 (block diagram, "ADC options: ADS7828 (from AMSAT)")
+//
+// 8-channel 12-bit SAR with an internal 2.5 V reference on I2C. One command byte selects
+// the channel and the power-down mode; the conversion comes back as two bytes, four leading
+// zeros then D11..D0. Only one input channel is used: the mux upstream of the TIA does the
+// per-diode selection, so the ADC sees a single TIA output.
 // ---------------------------------------------------------------------------
 
 /// ADC resolution in bits.
-#define SXUV5_ADC_BITS 16
+#define SXUV5_ADC_BITS 12
 
-/// Bytes clocked out per conversion frame.
+/// Bytes read back per conversion.
 #define SXUV5_ADC_FRAME_BYTES 2
 
-/// Right-shift applied to the assembled frame to right-align the code (MSB-aligned parts need this).
-#define SXUV5_ADC_SHIFT 0
-
-/// ADC reference voltage [V].
+/// Reference voltage [V]. The ADS7828's internal reference; full scale, not the 3.3 V rail.
 #define SXUV5_ADC_VREF_V 2.5f
 
-/// Set to 1 for a bipolar/two's-complement output part, 0 for straight binary.
-#define SXUV5_ADC_SIGNED 0
+/**
+ * RMS noise referred to the ADC input [V].
+ *
+ * Well under an LSB (610 µV) for a part this coarse, so the uncertainty model is quantisation-
+ * dominated at the ADC and Johnson-dominated at the TIA. Kept as a term so a noisier part
+ * substituted later shows up in σ instead of silently flattering it.
+ */
+#define SXUV5_ADC_NOISE_VRMS 1.0e-4f
 
-/// RMS noise referred to the ADC input [V]. Used by the uncertainty model.
-#define SXUV5_ADC_NOISE_VRMS 3.0e-5f
+/// Single-ended input the TIA output lands on (0–7).
+#define SXUV5_ADC_CHANNEL 0
 
-/// SPI clock [Hz].
-#define SXUV5_SPI_BAUD 2000000u
+/**
+ * ADS7828 command-byte power-down field (PD1:PD0, bits 3:2).
+ *
+ * 0b11 keeps the internal reference and the converter both on. Powering either down between
+ * conversions saves a rail already gated by SENS_PWR, and would cost a reference settling
+ * delay on every single sample.
+ */
+#define SXUV5_ADC_PD_MODE 0x3u
+
+/// I2C clock [Hz]. Fast mode; the bus is shared, so this is a bus-wide decision.
+#define SXUV5_I2C_BAUD 400000u
+
+/// Per-transfer I2C timeout [µs]. Bounds a wedged or unpowered slave into an ADC_FAULT.
+#define SXUV5_I2C_TIMEOUT_US 5000u
 
 /// Full-scale code, derived.
 #define SXUV5_ADC_FULL_SCALE ((1u << SXUV5_ADC_BITS) - 1u)
+
+
+// ---------------------------------------------------------------------------
+// Sensor rail  (SENS_PWR — dual low-power switch)
+// ---------------------------------------------------------------------------
+
+/**
+ * Delay from asserting SENS_PWR to a trustworthy conversion [µs]. (TBC)
+ *
+ * Bounded below by the ADS7828's internal reference charging its bypass capacitor, and above
+ * by the TIA: at R_f = 1 GΩ the front end needs ~10τ ≈ 5 ms to forget its power-on transient,
+ * and the coax capacitance the mux presents does not help. Budgeted long deliberately — this
+ * is paid once per power cycle, not once per sample.
+ */
+#define SXUV5_SENS_PWR_SETTLE_US 20000u
 
 
 // ---------------------------------------------------------------------------
@@ -113,6 +148,15 @@
 /// Dark current doubles every this many °C (datasheet range 8–10 °C).
 #define SXUV5_DARK_DOUBLING_C 9.0f
 
+/**
+ * Expected photocurrent from a fully sunlit face [A].
+ *
+ * ~1.3 nA for most sun spectra, per the block diagram's estimate from the LISIRD TIMED SEE SSI
+ * instrument. This is what sizes the gain ladder: at R_f = 1 GΩ it lands near half of the
+ * ADS7828's 2.5 V full scale, which is why SXUV5_DEFAULT_GAIN seeds the auto-range there.
+ */
+#define SXUV5_NOMINAL_PHOTOCURRENT_A 1.3e-9f
+
 /// Radiometric calibration uncertainty per face, relative (1σ).
 #define SXUV5_CAL_REL_UNCERTAINTY 0.02f
 
@@ -132,6 +176,15 @@
 
 /// Maximum gain changes per auto-ranged read, bounding worst-case read latency.
 #define SXUV5_AUTORANGE_MAX_STEPS 4
+
+/**
+ * Gain the auto-range starts from on a cold face, as an index into the R_f ladder.
+ *
+ * The highest gain, because SXUV5_NOMINAL_PHOTOCURRENT_A lands mid-scale there and a sunlit
+ * face is the expected case. Starting lower would cost an extra settle — and the settles are
+ * the expensive part of a pass — on nearly every sample.
+ */
+#define SXUV5_DEFAULT_GAIN (SXUV5_GAIN_COUNT - 1)
 
 
 // ---------------------------------------------------------------------------

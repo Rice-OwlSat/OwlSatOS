@@ -7,10 +7,19 @@
               so no single diode measures the quantity the science wants. Recovering the true
               normal-incidence irradiance means combining the five projections.
 
+              The chain, as drawn in "OwlSat Hardware block diagram.png" (Sensor Domain → Science):
+
+                5× SXUV5 ─5× coax─> MMCX ─> analog mux ─> variable-gain TIA ─> ADS7828 ─I2C0─> RP2350
+
+              One mux and one amplifier serve all five diodes, which is what makes this a
+              sequential array rather than five parallel channels: every reading costs a channel
+              change and the settling time that follows it. The flight computer's wires into the
+              chain are exactly four: MUXSEL (3×), GAINSEL (2×), SENS_PWR, and I2C0.
+
               The API is layered, and each layer is separately callable so that a failure in one
               does not deny access to the one below it:
 
-                L0  Transport   — mux channel select, TIA gain select, ADC frame over SPI.
+                L0  Transport   — rail enable, mux channel select, TIA gain select, ADC over I2C.
                 L1  Acquisition — SampleRaw() / SampleEUV(): ADC codes, auto-ranged, timestamped.
                 L2  Conversion  — codes -> photocurrent -> per-face irradiance, with per-face σ.
                 L3  Fusion      — ScaleEUV(): five projections -> one true irradiance + sun vector.
@@ -24,11 +33,14 @@
               fusion step drops, never to a failed subsystem.
 
               @par Threading
-              All calls are synchronous and block for the SPI transaction and the front-end
+              All calls are synchronous and block for the I2C transaction and the front-end
               settling time. They do not delay on a timer or manage cadence — that belongs to
               the FreeRTOS task layer via vTaskDelayUntil against a fixed reference timestamp.
-              The driver is *not* internally serialised: if more than one task samples the array,
-              the caller owns the mutex, because mux and gain state are global to the chain.
+              The driver is *not* internally serialised, and there are two separate reasons to
+              hold a lock around it. Mux and gain state are global to the chain, so two tasks
+              sampling different faces will read each other's channel. And I2C0 is shared with
+              the sensor-rail power monitor, the IMU and the magnetometer, so the bus lock is
+              not the driver's to own — it belongs to whatever arbitrates I2C0 board-wide.
 
   @author     Viola Case
   @date       11.08.2026
@@ -80,15 +92,27 @@ namespace OwlSat {
     SXUV5_FLAG_GRAZING     = 1u << 5,  ///< cos(θ) below SXUV5_MIN_COSINE; excluded from the fit.
     SXUV5_FLAG_OUTLIER     = 1u << 6,  ///< Inconsistent with the other faces; dropped from the fit.
     SXUV5_FLAG_AUTORANGE   = 1u << 7,  ///< Auto-range hit its step limit without converging.
+    SXUV5_FLAG_UNPOWERED   = 1u << 8,  ///< SENS_PWR is off; mux, TIA and ADC are all dark. See SetEUVPower().
 
     // Reconstruction-level flags, reported in EUVResult::flags.
-    SXUV5_FLAG_ECLIPSE       = 1u << 8,  ///< No face is sunlit. Irradiance is not measurable.
-    SXUV5_FLAG_Z_UNOBSERVED  = 1u << 9,  ///< Sun is in the −Z hemisphere; the missing face blinds us.
-    SXUV5_FLAG_LOWER_BOUND   = 1u << 10, ///< Result is a lower bound, not an estimate. See ScaleEUV().
-    SXUV5_FLAG_DEGENERATE    = 1u << 11, ///< Too few usable faces to constrain the fit.
-    SXUV5_FLAG_OUT_OF_FAMILY = 1u << 12, ///< Result outside the plausible solar range; suspect the chain.
-    SXUV5_FLAG_POOR_FIT      = 1u << 13, ///< χ²/dof large: the faces disagree beyond their stated σ.
+    SXUV5_FLAG_ECLIPSE       = 1u << 9,  ///< No face is sunlit. Irradiance is not measurable.
+    SXUV5_FLAG_Z_UNOBSERVED  = 1u << 10, ///< Sun is in the −Z hemisphere; the missing face blinds us.
+    SXUV5_FLAG_LOWER_BOUND   = 1u << 11, ///< Result is a lower bound, not an estimate. See ScaleEUV().
+    SXUV5_FLAG_DEGENERATE    = 1u << 12, ///< Too few usable faces to constrain the fit.
+    SXUV5_FLAG_OUT_OF_FAMILY = 1u << 13, ///< Result outside the plausible solar range; suspect the chain.
+    SXUV5_FLAG_POOR_FIT      = 1u << 14, ///< χ²/dof large: the faces disagree beyond their stated σ.
   };
+
+  /**
+   * @brief The flags that mean "this channel carries no information", as opposed to information
+   *        that happens to be inconvenient.
+   *
+   * A saturated, grazing or dark face still measured something; a faulted, disabled or
+   * unpowered one did not. Everything that decides whether to convert a sample or fold it into
+   * a fit tests against this mask, so the three cases cannot drift apart.
+   */
+  constexpr uint16_t SXUV5_FLAGS_NO_DATA =
+    SXUV5_FLAG_ADC_FAULT | SXUV5_FLAG_DISABLED | SXUV5_FLAG_UNPOWERED;
 
   /**
    * @brief One unconverted ADC reading. No scaling, no calibration, no interpretation.
@@ -200,18 +224,19 @@ namespace OwlSat {
   // =========================================================================
 
   /**
-   * @brief Hook for the ADC transport, so the driver can be built and tested before the ADC
-   *        part number is settled (docs/internal/sxuv5.md §6.4).
+   * @brief Hook for the ADC transport, so the driver can be exercised on the bench without an
+   *        ADS7828 answering on the bus.
    *
-   * @c convert is called with the mux channel already selected and the gain already settled,
-   * and must return a right-aligned code. Returning false marks the sample SXUV5_FLAG_ADC_FAULT.
+   * @c convert is called with the rail up, the mux channel already selected and the gain already
+   * settled, and must return a right-aligned code. Returning false marks the sample
+   * SXUV5_FLAG_ADC_FAULT.
    */
   struct AdcTransport {
     bool (*init)();
     bool (*convert)(uint32_t *code_out);
   };
 
-  /// Installs a transport. Pass nullptr members to fall back to the built-in SPI implementation.
+  /// Installs a transport. Pass nullptr members to fall back to the built-in ADS7828/I2C driver.
   void SetAdcTransport(const AdcTransport &transport);
 
   /**
@@ -224,11 +249,36 @@ namespace OwlSat {
   void SetTemperatureProvider(float (*provider)());
 
   /**
-   * @brief Configures GPIO, SPI and the mux/gain lines, and loads default calibration.
+   * @brief Configures GPIO, I2C0 and the mux/gain lines, powers the science rail, and loads
+   *        default calibration.
+   *
+   * Asserts SENS_PWR and waits SXUV5_SENS_PWR_SETTLE_US before touching the bus, because none
+   * of the chain — including the ADC that has to acknowledge its own address — exists until
+   * that switch closes.
+   *
    * @return False if the transport failed to initialise. The API remains callable and will
    *         report SXUV5_FLAG_ADC_FAULT per sample.
    */
   bool InitEUV();
+
+  /**
+   * @brief Opens or closes the science channel of the dual low-power switch (SENS_PWR).
+   *
+   * The whole chain is downstream of this switch, so powering it off is the subsystem's only
+   * real low-power state — there is nothing else to gate. Powering back on costs
+   * SXUV5_SENS_PWR_SETTLE_US, which this call absorbs, so the first sample afterwards is as
+   * trustworthy as any other. While the rail is down every sample returns SXUV5_FLAG_UNPOWERED
+   * rather than SXUV5_FLAG_ADC_FAULT: an ADC that is switched off is not an ADC that is broken,
+   * and the distinction is the difference between a power-budget decision and a fault report.
+   *
+   * @param on True to power the chain.
+   * @return State of the rail after the call.
+   */
+  bool SetEUVPower(bool on);
+
+  /// @return True if SENS_PWR is asserted. Reflects the commanded state, not a measured one —
+  ///         the ADM1176 on the same rail is what can actually confirm current is flowing.
+  bool EUVPowered();
 
   /**
    * @brief Single conversion at an explicit gain. No auto-ranging, no conversion to units.

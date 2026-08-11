@@ -8,6 +8,11 @@
               The diode itself has no digital interface and firmware never touches it. The real
               hardware dependency is the ADC; the diode's parameters enter only as calibration
               constants (docs/internal/sxuv5.md §2).
+
+              Transport follows the Sensor Domain of the hardware block diagram
+              (docs/internal/hardware_block_diagram.md): SENS_PWR gates the rail, MUXSEL (3×)
+              picks the diode, GAINSEL (2×) picks the transimpedance, and an ADS7828 on the
+              shared I2C0 bus returns the code.
   @author     Viola Case
   @date       11.08.2026
   @copyright  © Viola Case, 2026. All rights reserved.
@@ -15,7 +20,7 @@
 **/
 
 #include <pico/stdlib.h>
-#include <hardware/spi.h>
+#include <hardware/i2c.h>
 #include <hardware/gpio.h>
 #include <cstdint>
 #include <cmath>
@@ -58,7 +63,11 @@ namespace OwlSat {
     FaceCal gCal[SXUV5_FACE_COUNT];
 
     /// Gain that last produced an in-range code, per face. Seeds the auto-range search.
-    Gain gLastGain[SXUV5_FACE_COUNT] = { Gain::Gain2, Gain::Gain2, Gain::Gain2, Gain::Gain2, Gain::Gain2 };
+    Gain gLastGain[SXUV5_FACE_COUNT] = {
+      static_cast<Gain>(SXUV5_DEFAULT_GAIN), static_cast<Gain>(SXUV5_DEFAULT_GAIN),
+      static_cast<Gain>(SXUV5_DEFAULT_GAIN), static_cast<Gain>(SXUV5_DEFAULT_GAIN),
+      static_cast<Gain>(SXUV5_DEFAULT_GAIN),
+    };
 
     bool gInitialised = false;
 
@@ -71,65 +80,84 @@ namespace OwlSat {
 
 
     // -----------------------------------------------------------------------
-    // Built-in SPI transport
+    // Built-in ADS7828 transport (I2C0)
     // -----------------------------------------------------------------------
 
-    bool SpiInit() {
-      spi_init(EUV_ADC_SPI, SXUV5_SPI_BAUD);
-      gpio_set_function(EUV_ADC_SCK, GPIO_FUNC_SPI);
-      gpio_set_function(EUV_ADC_MOSI, GPIO_FUNC_SPI);
-      gpio_set_function(EUV_ADC_MISO, GPIO_FUNC_SPI);
+    /**
+     * ADS7828 command byte.
+     *
+     * Bit 7 SD = 1 selects single-ended inputs. Bits 6:4 are the channel field, whose bit order
+     * is not the channel number: the datasheet's single-ended table maps C2 to the channel's
+     * LSB and C1:C0 to its upper bits, so CH1 is 0b100, not 0b001. Bits 3:2 are the power-down
+     * field; bits 1:0 are reserved zero.
+     */
+    constexpr uint8_t Ads7828Command(uint8_t channel, uint8_t pd_mode) {
+      const uint8_t select = static_cast<uint8_t>(((channel & 0x1u) << 2) | ((channel >> 1) & 0x3u));
+      return static_cast<uint8_t>(0x80u | (select << 4) | ((pd_mode & 0x3u) << 2));
+    }
 
-      // CS is driven by hand rather than by the SPI block: most SAR parts want CS to frame the
-      // whole conversion, not each byte.
-      gpio_init(EUV_ADC_CS);
-      gpio_set_dir(EUV_ADC_CS, GPIO_OUT);
-      gpio_put(EUV_ADC_CS, 1);
+    constexpr uint8_t kAdcCommand = Ads7828Command(SXUV5_ADC_CHANNEL, SXUV5_ADC_PD_MODE);
+
+    bool I2cInit() {
+      i2c_init(EUV_ADC_I2C, SXUV5_I2C_BAUD);
+      gpio_set_function(EUV_ADC_SDA, GPIO_FUNC_I2C);
+      gpio_set_function(EUV_ADC_SCL, GPIO_FUNC_I2C);
+
+      // No internal pull-ups. I2C0 is a board-level bus with its own pull-ups sized for the
+      // whole segment; adding the RP2350's weak ones here would fight that sizing.
       return true;
     }
 
     /**
-     * Reads one conversion frame, MSB first, and right-aligns it.
+     * One conversion: write the command byte, read the 12-bit result back MSB first.
      *
-     * Written against the generic "assert CS, clock out N bytes, deassert" SAR pattern. Once the
-     * ADC part is chosen (docs/internal/sxuv5.md §6.4) this either stays as-is or is replaced
-     * wholesale through SetAdcTransport() — which is the reason the hook exists.
+     * Every transfer is bounded by a timeout rather than allowed to block. The ADS7828 shares
+     * I2C0 with the power monitors, the IMU and the magnetometer, so a part that stops
+     * acknowledging must become a flagged sample and release the bus, not stall the caller.
      */
-    bool SpiConvert(uint32_t *code_out) {
-      uint8_t rx[SXUV5_ADC_FRAME_BYTES] = { 0 };
-      uint8_t tx[SXUV5_ADC_FRAME_BYTES] = { 0 };
+    bool I2cConvert(uint32_t *code_out) {
+      const uint8_t command = kAdcCommand;
 
-      gpio_put(EUV_ADC_CS, 0);
-      const int read = spi_write_read_blocking(EUV_ADC_SPI, tx, rx, SXUV5_ADC_FRAME_BYTES);
-      gpio_put(EUV_ADC_CS, 1);
+      const int written = i2c_write_timeout_us(EUV_ADC_I2C, EUV_ADC_ADDR, &command, 1, false,
+                                               SXUV5_I2C_TIMEOUT_US);
+      if (written != 1) return false;
 
+      uint8_t   rx[SXUV5_ADC_FRAME_BYTES] = { 0 };
+      const int read = i2c_read_timeout_us(EUV_ADC_I2C, EUV_ADC_ADDR, rx, SXUV5_ADC_FRAME_BYTES,
+                                           false, SXUV5_I2C_TIMEOUT_US);
       if (read != SXUV5_ADC_FRAME_BYTES) return false;
 
-      uint32_t code = 0;
-      for (int i = 0; i < SXUV5_ADC_FRAME_BYTES; ++i) code = (code << 8) | rx[i];
+      // Four leading zeros then D11..D0. Masking to full scale is not cosmetic: it is what keeps
+      // a bus glitch in the high nibble from arriving as a plausible over-range code.
+      const uint32_t code = (static_cast<uint32_t>(rx[0]) << 8) | rx[1];
 
-      code >>= SXUV5_ADC_SHIFT;
-      code &= SXUV5_ADC_FULL_SCALE;
-
-      *code_out = code;
+      *code_out = code & SXUV5_ADC_FULL_SCALE;
       return true;
     }
 
-    AdcTransport gTransport = { SpiInit, SpiConvert };
+    AdcTransport gTransport = { I2cInit, I2cConvert };
 
 
     // -----------------------------------------------------------------------
-    // Mux and gain
+    // Rail, mux and gain
     // -----------------------------------------------------------------------
+
+    bool gPowered = false;
 
     void InitGpio() {
-      const uint pins[] = { EUV_MUX_SEL0, EUV_MUX_SEL1, EUV_MUX_SEL2, EUV_MUX_EN, EUV_TIA_GAIN0, EUV_TIA_GAIN1 };
+      const uint pins[] = { EUV_MUX_SEL0, EUV_MUX_SEL1, EUV_MUX_SEL2, EUV_TIA_GAIN0, EUV_TIA_GAIN1 };
       for (const uint pin : pins) {
         gpio_init(pin);
         gpio_set_dir(pin, GPIO_OUT);
         gpio_put(pin, 0);
       }
-      gpio_put(EUV_MUX_EN, 1);
+
+      // SENS_PWR starts deasserted so that a reset mid-flight leaves the science rail off until
+      // something asks for it, rather than powering an analog chain nobody is reading.
+      gpio_init(EUV_SENS_PWR);
+      gpio_set_dir(EUV_SENS_PWR, GPIO_OUT);
+      gpio_put(EUV_SENS_PWR, 0);
+      gPowered = false;
     }
 
     void SelectFace(Face face) {
@@ -145,19 +173,10 @@ namespace OwlSat {
       gpio_put(EUV_TIA_GAIN1, (code >> 1) & 1u);
     }
 
-    /// ADC code -> volts at the ADC input, honouring the signed/unsigned output format.
+    /// ADC code -> volts at the ADC input. The ADS7828 is unipolar straight binary.
     float CodeToVolts(uint32_t code) {
       constexpr float kLsb = SXUV5_ADC_VREF_V / static_cast<float>(1u << SXUV5_ADC_BITS);
-
-  #if SXUV5_ADC_SIGNED
-      // Sign-extend from the ADC's width into int32_t.
-      constexpr uint32_t kSignBit = 1u << (SXUV5_ADC_BITS - 1);
-      int32_t            signed_code = static_cast<int32_t>(code);
-      if (code & kSignBit) signed_code -= static_cast<int32_t>(1u << SXUV5_ADC_BITS);
-      return static_cast<float>(signed_code) * kLsb;
-  #else
       return static_cast<float>(code) * kLsb;
-  #endif
     }
 
   } // namespace
@@ -221,8 +240,8 @@ namespace OwlSat {
   // =========================================================================
 
   void SetAdcTransport(const AdcTransport &transport) {
-    gTransport.init    = transport.init != nullptr ? transport.init : SpiInit;
-    gTransport.convert = transport.convert != nullptr ? transport.convert : SpiConvert;
+    gTransport.init    = transport.init != nullptr ? transport.init : I2cInit;
+    gTransport.convert = transport.convert != nullptr ? transport.convert : I2cConvert;
   }
 
 
@@ -231,13 +250,43 @@ namespace OwlSat {
   }
 
 
+  bool SetEUVPower(bool on) {
+    if (on == gPowered) return gPowered;
+
+    if (!on) {
+      // Park the select lines low before the rail drops. Holding a logic high into an unpowered
+      // analog switch drives current through its input protection diodes, which is how a mux
+      // ends up phantom-powered and out of spec.
+      SelectFace(static_cast<Face>(0));
+      SelectGain(static_cast<Gain>(0));
+    }
+
+    gpio_put(EUV_SENS_PWR, on ? 1 : 0);
+    gPowered = on;
+
+    // Charge the reference and let the front end forget the transient. Paid once per power
+    // cycle, so the first sample after this call is worth as much as any other.
+    if (on) sleep_us(SXUV5_SENS_PWR_SETTLE_US);
+
+    return gPowered;
+  }
+
+
+  bool EUVPowered() { return gPowered; }
+
+
   bool InitEUV() {
     ResetCalibration();
     InitGpio();
 
-    const bool ok = gTransport.init != nullptr ? gTransport.init() : true;
-    gInitialised  = true;
-    return ok;
+    // The bus pins are configured before the rail comes up; the ADS7828 cannot acknowledge its
+    // address until it is powered, so nothing may talk to it before SetEUVPower() returns.
+    const bool bus_ok = gTransport.init != nullptr ? gTransport.init() : true;
+
+    SetEUVPower(true);
+
+    gInitialised = true;
+    return bus_ok;
   }
 
 
@@ -258,11 +307,20 @@ namespace OwlSat {
       return sample;
     }
 
+    // Nothing downstream of SENS_PWR exists while the switch is open. Reporting this separately
+    // from ADC_FAULT keeps a deliberate power-down from reading as a broken converter.
+    if (!gPowered) {
+      sample.flags |= SXUV5_FLAG_UNPOWERED;
+      sample.timestamp_us = time_us_32();
+      return sample;
+    }
+
     SelectFace(face);
     SelectGain(gain);
 
-    // The settle is not optional. At 100 MΩ the summing node recovers from the analog switch's
-    // charge injection on a timescale comparable to the sample interval itself.
+    // The settle is not optional. At the top of the gain ladder — 1 GΩ, where a sunlit face's
+    // ~1.3 nA belongs — the summing node recovers from the analog switch's charge injection on
+    // a timescale comparable to the sample interval itself.
     sleep_us(kSettleUs[Index(gain)]);
 
     uint32_t code = 0;
@@ -288,7 +346,7 @@ namespace OwlSat {
     RawSample sample = SampleRawAt(face, gain);
 
     for (int step = 0; step < SXUV5_AUTORANGE_MAX_STEPS; ++step) {
-      if (sample.flags & (SXUV5_FLAG_ADC_FAULT | SXUV5_FLAG_DISABLED)) return sample;
+      if (sample.flags & SXUV5_FLAGS_NO_DATA) return sample;
 
       const uint8_t g = Index(gain);
 
@@ -334,7 +392,7 @@ namespace OwlSat {
   // =========================================================================
 
   float RawToCurrent(const RawSample &raw, float temperature_c) {
-    if (raw.flags & (SXUV5_FLAG_ADC_FAULT | SXUV5_FLAG_DISABLED)) return 0.0f;
+    if (raw.flags & SXUV5_FLAGS_NO_DATA) return 0.0f;
 
     const FaceCal &cal = gCal[Index(raw.face)];
     const uint8_t  g   = Index(raw.gain);
@@ -402,7 +460,7 @@ namespace OwlSat {
     FaceSample sample {};
     sample.raw = raw;
 
-    if (raw.flags & (SXUV5_FLAG_ADC_FAULT | SXUV5_FLAG_DISABLED)) {
+    if (raw.flags & SXUV5_FLAGS_NO_DATA) {
       // No information in this channel. Leave the physical fields zeroed rather than emitting a
       // plausible-looking number that downstream code would happily average in.
       return sample;
