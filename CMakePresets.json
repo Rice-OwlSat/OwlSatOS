@@ -1,0 +1,130 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "pico-base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "PICO_BOARD": "pico2",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "windows-base",
+      "hidden": true,
+      "inherits": "pico-base",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "PICO_SDK_PATH": {
+          "type": "PATH",
+          "value": "$env{USERPROFILE}/.pico-sdk/sdk/2.2.0"
+        },
+        "PICO_GCC_PATH": {
+          "type": "FILEPATH",
+          "value": "$env{USERPROFILE}/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc.exe"
+        }
+      }
+    },
+    {
+      "name": "unix-base",
+      "hidden": true,
+      "inherits": "pico-base",
+      "condition": {
+        "type": "notEquals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "PICO_SDK_PATH": {
+          "type": "PATH",
+          "value": "$env{HOME}/.pico-sdk/sdk/2.2.0"
+        },
+        "PICO_GCC_PATH": {
+          "type": "FILEPATH",
+          "value": "$env{HOME}/.pico-sdk/toolchain/14_2_Rel1/bin/arm-none-eabi-gcc"
+        }
+      }
+    },
+    {
+      "name": "pico2-release",
+      "displayName": "Release - Pico 2 (arm-none-eabi-gcc)",
+      "description": "Optimised RP2350 build; mirrors the CLion 'Release-Pico eabi-gcc' profile.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "pico2-debug",
+      "displayName": "Debug - Pico 2 (arm-none-eabi-gcc)",
+      "description": "Unoptimised RP2350 build with debug symbols, for SWD/debugprobe sessions.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "pico2-relwithdebinfo",
+      "displayName": "RelWithDebInfo - Pico 2 (arm-none-eabi-gcc)",
+      "description": "Optimised RP2350 build that keeps debug symbols.",
+      "inherits": "windows-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "pico2-release-unix",
+      "displayName": "Release - Pico 2 (Linux/macOS host)",
+      "inherits": "unix-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "pico2-debug-unix",
+      "displayName": "Debug - Pico 2 (Linux/macOS host)",
+      "inherits": "unix-base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "pico2-release",
+      "configurePreset": "pico2-release",
+      "targets": "OwlSatOS"
+    },
+    {
+      "name": "pico2-debug",
+      "configurePreset": "pico2-debug",
+      "targets": "OwlSatOS"
+    },
+    {
+      "name": "pico2-relwithdebinfo",
+      "configurePreset": "pico2-relwithdebinfo",
+      "targets": "OwlSatOS"
+    },
+    {
+      "name": "pico2-release-unix",
+      "configurePreset": "pico2-release-unix",
+      "targets": "OwlSatOS"
+    },
+    {
+      "name": "pico2-debug-unix",
+      "configurePreset": "pico2-debug-unix",
+      "targets": "OwlSatOS"
+    }
+  ]
+}

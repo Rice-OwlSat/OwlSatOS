@@ -1,75 +1,60 @@
-#include <pico/stdlib.h>
+/**
+ * @file OwlSatOS.cpp
+ * @brief Entry point and core FreeRTOS tasks for OwlSatOS.
+ *
+ * Initialises GPIO, creates the board LED blink task and button-read task,
+ * then hands control to the FreeRTOS scheduler.
+ *
+ * @date 6.10.2026
+ */
+
 #include "FreeRTOS.h"
 #include "task.h"
-
 #include <cstdio>
-#include "console.h"
+#include <pico/stdlib.h>
 
-extern "C" {
-    #include "tusb.h"
-    void msc_disk_init(void);
+#define GPIO_ON  1 ///< Logic high — drive GPIO pin high.
+#define GPIO_OFF 0 ///< Logic low  — drive GPIO pin low.
+
+constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN;
+
+void blink(void *param) {
+  unsigned long n = 0;
+  for (;;) {
+    gpio_put(LED_PIN, GPIO_ON);
+    printf("heartbeat %lu (LED pin %u HIGH)\n", n++, LED_PIN);
+    vTaskDelay(pdMS_TO_TICKS(500));
+    gpio_put(LED_PIN, GPIO_OFF);
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
 }
 
-#define A 0
-#define B 1
-#define C 2
-#define D 3
-#define E 4
-#define F 5
-#define G 6
-
-
-#define GPIO_ON 1
-#define GPIO_OFF 0
-
-const int LED_PIN = PICO_DEFAULT_LED_PIN;
-
-void BoardLEDTask(void *param) {
-    for (;;) {
-        gpio_put(LED_PIN, GPIO_ON);
-        // std::cout << "on" << std::endl;
-        vTaskDelay(pdMS_TO_TICKS(250));
-        gpio_put(LED_PIN, GPIO_OFF);
-        // std::cout << "off" << std::endl;
-        vTaskDelay(pdMS_TO_TICKS(250));
-        // fflush(stdout);
-    }
-}
-
-struct state {
-    bool curState : 1;
-    bool prevState : 1;
-};
-
-state ButtonState{};
-
-uint8_t counter {0};
-
-void set_pins(uint8_t);
-
-void vUSBTask(void *param) {
-    (void)param;
-    msc_disk_init();
-    tusb_init();
-    for (;;) {
-        tud_task();
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-}
-
+/**
+ * @brief Firmware entry point.
+ *
+ * Initialises stdio and all GPIO pins, then creates FreeRTOS tasks and
+ * starts the scheduler. Never returns.
+ *
+ * @return int Never reached.
+ */
 int main() {
-    stdio_init_all();
-    printf("UART alive\n");   // add this
-    fflush(stdout);
+  stdio_init_all();
+  sleep_ms(300);  // let the UART settle before first output
 
-    gpio_init(LED_PIN);
-    gpio_set_dir(LED_PIN, GPIO_OUT);
+  // Boot banner: if this prints, main() runs and UART works (independent of FreeRTOS).
+  printf("\n=== OwlSatOS boot: main() reached, stdio up ===\n");
 
-    xTaskCreate(vUSBTask,      "USB",       512, nullptr, tskIDLE_PRIORITY + 1, nullptr);
-    xTaskCreate(BoardLEDTask,  "Board LED", 256, nullptr, tskIDLE_PRIORITY + 1, nullptr);
-    xTaskCreate(consoleTask,   "Console",   512, nullptr, tskIDLE_PRIORITY + 1, nullptr);
+  gpio_init(LED_PIN);
+  gpio_set_dir(LED_PIN, GPIO_OUT);
 
-    vTaskStartScheduler();
+  BaseType_t ok = xTaskCreate(blink, "blink", 128, nullptr, tskIDLE_PRIORITY+1, nullptr);
+  printf("xTaskCreate returned %ld (pdPASS=%ld); starting scheduler...\n",
+         (long)ok, (long)pdPASS);
 
-    for (;;) {}
+  vTaskStartScheduler();
+
+  // Should never reach here unless the scheduler failed to start.
+  printf("ERROR: scheduler returned!\n");
+
+  return 0;
 }

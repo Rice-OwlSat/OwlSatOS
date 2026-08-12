@@ -1,4 +1,6 @@
 build
 !.vscode/*
 .claude
-docs
+docs/html
+docs/latex
+.idea
