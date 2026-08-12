@@ -206,11 +206,17 @@
 #define SXUV5_OUTLIER_SIGMA 3.0f
 
 /**
- * Nominal band-integrated solar EUV irradiance at 1 AU [W/m²].
+ * Nominal band-integrated solar EUV irradiance at 1 AU [W/m²]. (Derived)
+ *
+ * Derived from the same ~1.3 nA photocurrent estimate that sizes the gain ladder, so the
+ * family check is centred on the signal the front end was designed for and the two numbers
+ * cannot disagree. ≈ 9.6e-4 W/m² with the current constants; an independently sourced
+ * literal here once sat 10× above this and put the nominal signal just outside the band.
  *
  * Sanity bound only — a reconstruction wildly outside this is flagged, never clamped.
  */
-#define SXUV5_NOMINAL_IRRADIANCE_W_M2 1.0e-2f
+#define SXUV5_NOMINAL_IRRADIANCE_W_M2 \
+  (SXUV5_NOMINAL_PHOTOCURRENT_A / (SXUV5_RESPONSIVITY_A_PER_W * SXUV5_ACTIVE_AREA_M2))
 
 /// Reconstructions outside NOMINAL × [1/this, this] raise SXUV5_FLAG_OUT_OF_FAMILY.
 #define SXUV5_FAMILY_RATIO 10.0f
