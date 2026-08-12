@@ -1,3 +1,11 @@
+/**
+ * @file FreeRTOSConfig.h
+ * @brief FreeRTOS kernel configuration for OwlSatOS on the RP2350 (Cortex-M33).
+ *
+ * Tuned for the RP2350's 133 MHz clock, 520 KB SRAM, and hardware FPU.
+ * MPU and TrustZone are disabled; the firmware runs entirely in Secure state.
+ */
+
 #ifndef FREERTOS_CONFIG_H
 #define FREERTOS_CONFIG_H
 
