@@ -213,9 +213,12 @@ namespace OwlSat {
       const FaceCal &cal = Calibration(static_cast<Face>(i));
       const float    raw_cosine = Dot(cal.normal, s);
       if (raw_cosine < SXUV5_MIN_COSINE) {
-        // Grazing or back-lit. Excluded from the fit, but reported: a pass that quietly drops
-        // faces looks identical in telemetry to one where those faces were never healthy.
-        result.flags |= SXUV5_FLAG_GRAZING;
+        // Excluded from the fit. Back-lit faces are the normal case — at least one face of
+        // every opposed pair points away from the sun — so a flag raised for every exclusion
+        // would be raised on every pass and mean nothing. The report-worthy case is a face
+        // *reading light* where geometry says it cannot see the sun: that disagreement is a
+        // wrong attitude, a wrong face normal, or a channel measuring something else.
+        if (Lit(face)) result.flags |= SXUV5_FLAG_GRAZING;
         continue;
       }
 
@@ -329,7 +332,10 @@ namespace OwlSat {
     result.sun_body[1]     = s[1];
     result.sun_body[2]     = s[2];
 
-    CheckFamily(result);
+    // An eclipsed array reading ~zero is the chain working correctly, not a reading out of
+    // family — mirroring how the standalone solver exempts a lower bound. OUT_OF_FAMILY is
+    // reserved for measurements that claim to be measurements.
+    if (!(result.flags & SXUV5_FLAG_ECLIPSE)) CheckFamily(result);
     return result;
   }
 

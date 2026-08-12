@@ -63,6 +63,8 @@ P_optical = I_photo / R(λ)
 
 `R(λ)` is a curve, not a scalar. The driver returns **current**, not irradiance. Spectral interpretation is a ground-segment problem, not a flight-software problem — do not embed a responsivity table in firmware.
 
+**This rule was relaxed when the interface grew its L2/L3 layers, and the relaxation is narrower than it looks.** In the EUV band each absorbed photon liberates E_photon/w pairs (w ≈ 3.63 eV), so responsivity is effectively flat at ≈ q/w ≈ 0.27 A/W — a scalar, not a table — which is enough for the band-integrated irradiance product the reconstruction needs in flight. What the rule was protecting still holds: spectral structure (absorption edges) remains a ground-segment correction, no responsivity *table* lives in firmware, the scalar is configuration (`sxuv5_config.h` / `FaceCal`) rather than a literal in the conversion path, and raw codes plus `RawToCurrent()` survive at every layer so the ground can redo the conversion with better numbers.
+
 ---
 
 ## 4. Driver Interface Contract
@@ -81,7 +83,7 @@ float read_current();
 
 Rules:
 
-- Both calls are **synchronous and blocking** on the SPI transaction. They do not delay, retry on a timer, or manage cadence.
+- Both calls are **synchronous and blocking** on the bus transaction (I2C0, since the ADS7828 decision — see §5) and the front-end settling time. They do not delay, retry on a timer, or manage cadence.
 - Cadence lives in the FreeRTOS task layer via `vTaskDelayUntil` against a fixed reference timestamp. Sample rate and publish rate remain independently tunable.
 - `read_raw` must remain available in flight. When calibration constants drift or prove wrong, raw codes are the only recoverable record.
 - Conversion constants (`R_f`, `V_ref`, ADC resolution) are compile-time configuration, not literals scattered through the conversion function.
@@ -146,4 +148,8 @@ Either figure is orders of magnitude faster than the mission's sampling cadence,
 
 ## 9. Redundancy
 
-The mission architecture carries multiple EUV sensors. The driver must therefore be **instance-based, not singleton**: channel identity is a construction parameter, not a global. A failed sensor must degrade to a flagged bad channel, not a failed subsystem.
+The mission architecture carries multiple EUV sensors. This section originally required an **instance-based** driver: channel identity as a construction parameter, not a global.
+
+**The implementation deviated, deliberately.** The five diodes are not five instances of a signal chain — they share one mux, one TIA, one ADC and one power rail, so the mutable state (mux channel, gain, SENS_PWR) is physically global no matter how the software is shaped. Pretending otherwise would mean five objects fighting over one set of GPIOs. The driver is therefore **channel-addressed**: every call names a `Face`, and per-face calibration and enablement live in a table indexed by it.
+
+What this section was actually protecting is preserved: a failed diode degrades to a flagged bad channel (`FaceCal::enabled`, `SXUV5_FLAG_DISABLED`) that reconstruction drops, never to a failed subsystem. If a second, electrically independent chain is ever flown, that is the moment instancing becomes real — the new chain brings its own state by construction — and this decision should be revisited then, not before.

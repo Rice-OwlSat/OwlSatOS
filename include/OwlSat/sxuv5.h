@@ -28,9 +28,13 @@
               turn out to be wrong, raw codes are the only recoverable record
               (docs/internal/sxuv5.md §4).
 
-              Per docs/internal/sxuv5.md §9 the array is instance-free but channel-addressed:
-              every call names a Face, and a dead diode degrades to a flagged channel that the
-              fusion step drops, never to a failed subsystem.
+              docs/internal/sxuv5.md §9 originally asked for an instance-based driver. This API
+              deviates deliberately — it is channel-addressed with shared state, because the five
+              diodes share one mux, one TIA, one ADC and one rail, so the mutable state is
+              physically global no matter how the software is shaped. What §9 was protecting
+              survives: every call names a Face, and a dead diode degrades to a flagged channel
+              that the fusion step drops, never to a failed subsystem. The deviation and its
+              rationale are recorded in §9.
 
               @par Threading
               All calls are synchronous and block for the I2C transaction and the front-end
@@ -89,7 +93,7 @@ namespace OwlSat {
     SXUV5_FLAG_DARK        = 1u << 2,  ///< Below the dark threshold — face is not sunlit.
     SXUV5_FLAG_ADC_FAULT   = 1u << 3,  ///< Transport failed; the sample carries no information.
     SXUV5_FLAG_DISABLED    = 1u << 4,  ///< Channel disabled by ground command.
-    SXUV5_FLAG_GRAZING     = 1u << 5,  ///< cos(θ) below SXUV5_MIN_COSINE; excluded from the fit.
+    SXUV5_FLAG_GRAZING     = 1u << 5,  ///< A face read light where geometry says cos(θ) < SXUV5_MIN_COSINE — attitude and photometry disagree. Face excluded from the fit.
     SXUV5_FLAG_OUTLIER     = 1u << 6,  ///< Inconsistent with the other faces; dropped from the fit.
     SXUV5_FLAG_AUTORANGE   = 1u << 7,  ///< Auto-range hit its step limit without converging.
     SXUV5_FLAG_UNPOWERED   = 1u << 8,  ///< SENS_PWR is off; mux, TIA and ADC are all dark. See SetEUVPower().
