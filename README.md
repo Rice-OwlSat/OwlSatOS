@@ -22,13 +22,8 @@ OwlSat flight software, written in C/C++ for the **RP2350** (Raspberry Pi Pico 2
 Each task lives on its own branch. Keep all work scoped to its task until it is complete and merged. Tasks are not ordered by priority.
 Once task is complete, make a pull request with verbose documentation.
 
-### TASK: Implement the filesystem layer (`storage` branch)
-The `storage` branch already has the raw FAT12 flash driver (`msc_disk.c`) and the USB MSC stack working. What is missing is the higher-level file API that the rest of the OS will use.
-- `FILE_STRUCTURE` in `src/storage.cpp` is empty — fill it out with at minimum: sector LBA, byte offset, file size, dirty flag
-- `openFile(path)` — locate or create the file's FAT12 directory entry, return a populated handle
-- `closeFile` — flush any dirty data and update the directory entry size
-- Add `readFile` and `writeFile` functions to the public API in `storage.h`
-- Must reuse the existing `write_cache`/`cache_flush`/`cache_load` machinery from `msc_disk.c` — do not add a second cache on top of it
+### TASK: Implement the filesystem layer (`nonvolatile-data-storage` branch)
+Need to rewrite this section
 
 ### TASK: Parse and store sensor/gyro data
 Depends on the filesystem layer above being merged first.
