@@ -12,8 +12,16 @@ also holds the program, without ever writing over the program.
 
 ## 0. The one assumption that colours everything
 
-The flight design (see `hardware_block_diagram.md` §2) calls for **MRAM** on QSPI, split into a
-code part and a data part. **We have not confirmed that the MRAM works, or how to drive it.**
+The flight design calls for **MRAM** on QSPI. As of the current hardware plan, the program and the
+data live on **one MRAM part, wired to CS0** — not the two-part split the block diagram draws
+(see [§2.2](#22-not-the-plan--a-separate-data-device-on-cs1)). **We have not confirmed that the
+MRAM works, that it boots, or how to drive it.**
+
+The working assumption, agreed with hardware and stated here so it is one line rather than folklore:
+
+> **Software treats the part as behaving identically to a 2 MiB NOR flash of the kind fitted to a
+> Pico.** Making that true at boot — stage 2, the read command set, XIP configuration — is
+> hardware's problem to solve, and is tracked as such in [§12](#12-answers-needed).
 
 So: **this API is specified against NOR flash semantics.** Erase-before-write, 4 KB erase
 granularity, 256-byte program pages, bits only go 1→0 until erased, finite erase endurance.
@@ -63,10 +71,12 @@ storage stack whose failure modes you cannot enumerate on one page is not that l
 
 ## 2. Address model
 
-### 2.1 Now — Pico 2 dev board, one 4 MB QSPI flash on CS0
+### 2.1 One QSPI device on CS0, shared with the program
+
+This is the layout on the bench **and** the layout in flight. It is not a stopgap.
 
 The program and the storage regions share one device. The program is at the bottom, growing up;
-storage is pinned to the **top**, at a fixed offset, growing nowhere.
+storage is pinned to the **top**, growing nowhere.
 
 ```
  XIP_BASE = 0x10000000
@@ -75,12 +85,30 @@ storage is pinned to the **top**, at a fixed offset, growing nowhere.
    |                                                   |
    +--------------------------------------------------+ __flash_binary_end
    |                                                   |
-   |  slack — unused, and deliberately not reclaimed   |
+   |  slack — firmware-update staging (§8)             |
    |                                                   |
-   +--------------------------------------------------+ 0x3C0000   <- STORAGE_BASE_OFFSET
-   |  storage regions (256 KB)                         |
-   +--------------------------------------------------+ 0x400000   (PICO_FLASH_SIZE_BYTES)
+   +--------------------------------------------------+ STORAGE_BASE_OFFSET
+   |  storage regions (1024 KB)                        |
+   +--------------------------------------------------+ PICO_FLASH_SIZE_BYTES
 ```
+
+The reservation is a fixed **1024 KB**. The offset it begins at is not fixed — it follows the
+device, because the dev board and the flight part are not the same size:
+
+```c
+#define STORAGE_RESERVE_BYTES  (1024u * 1024u)
+#define STORAGE_BASE_OFFSET    (PICO_FLASH_SIZE_BYTES - STORAGE_RESERVE_BYTES)
+```
+
+| Device | `PICO_FLASH_SIZE_BYTES` | `STORAGE_BASE_OFFSET` | Program + staging slack |
+|---|---|---|---|
+| Pico 2 dev board | 4 MB | `0x300000` | 3072 KB |
+| Flight part (2 MiB) | 2 MiB | `0x100000` | 1024 KB |
+
+Deriving the base rather than writing it down is the point: a hard-coded `0x3C0000` is correct on
+exactly one device and silently wrong on every other, and "silently wrong" here means storage
+overlapping the program. The one number that must be written down is the reservation size, and it
+is written down once.
 
 Anchoring to the *top* rather than to `__flash_binary_end` is the whole safety argument. The
 binary end moves every single build. If storage started there, every firmware update would
@@ -94,52 +122,71 @@ Verified SDK facts this rests on:
 | Constant | Value | Source |
 |---|---|---|
 | `XIP_BASE` | `0x10000000` | `hardware/regs/addressmap.h:24` |
-| `PICO_FLASH_SIZE_BYTES` | `4 * 1024 * 1024` | `boards/pico2.h:80` |
+| `PICO_FLASH_SIZE_BYTES` | `4 * 1024 * 1024` | `boards/pico2.h:80` — **dev board only**; flight overrides this |
 | `FLASH_SECTOR_SIZE` | `4096` (erase unit) | `hardware/flash.h:46` |
 | `FLASH_PAGE_SIZE` | `256` (program unit) | `hardware/flash.h:45` |
 | `__flash_binary_end` | linker symbol | `rp2350/memmap_default.ld:272` (`PROVIDE`d) |
 | `XIP_NOCACHE_NOALLOC_BASE` | `0x14000000` | `hardware/regs/addressmap.h:27` |
 
 **Offsets passed to the SDK are relative to `XIP_BASE`, not absolute pointers.**
-`flash_range_erase(0x3C0000, …)` — not `0x103C0000`. Reads go the other way: through
+`flash_range_erase(0x300000, …)` — not `0x10300000`. Reads go the other way: through
 `XIP_BASE + offset` as a normal `const` pointer. Mixing these up is the single easiest way to
 erase the program, so the region layer never lets a client see a raw offset at all
 ([§4](#4-region-layer)).
 
-### 2.2 Later — flight hardware, code MRAM on CS0, data MRAM on CS1
+### 2.2 Not the plan — a separate data device on CS1
 
-The RP2350's QMI has **two chip selects and two independently-configured address windows**
-(`qmi_hw_t.m[2]`, `hardware/structs/qmi.h:111`), with eight 4 MiB address-translation registers
-covering a 32 MiB virtual XIP space (`atrans[8]`, `qmi.h:118`). The SDK's flash API takes a chip
-select index throughout — `flash_devinfo_get_cs_size(uint cs)`, where "0 is QMI chip select 0
-(QSPI CS pin), 1 is QMI chip select 1" (`hardware/flash.h:197`).
+Recorded so it is not proposed again as though it were new, and so the cost of *not* doing it is
+written down somewhere.
+
+The block diagram draws two MRAM parts, code and data. Earlier revisions of this document treated
+a two-chip-select layout as the configuration to migrate toward:
 
 ```
   CS0   0x10000000  +------------------+   code MRAM — XIP, program only
-                    +------------------+
   CS1   0x11000000  +------------------+   data MRAM — storage regions only
-                    +------------------+
 ```
 
-This is the configuration worth getting to, because it makes the central safety property
-*structural* rather than *arithmetic*. Today, "don't overwrite the program" is an offset
-comparison that a bug can get wrong. With a separate data device, the storage path physically
-cannot address the program: it is a different chip select.
+The RP2350 can do this. Its QMI has **two chip selects and two independently-configured address
+windows** (`qmi_hw_t.m[2]`, `hardware/structs/qmi.h:111`), with eight 4 MiB address-translation
+registers covering a 32 MiB virtual XIP space (`atrans[8]`, `qmi.h:118`), and the SDK's flash API
+takes a chip select index throughout — `flash_devinfo_get_cs_size(uint cs)`, where "0 is QMI chip
+select 0 (QSPI CS pin), 1 is QMI chip select 1" (`hardware/flash.h:197`).
 
-The region layer therefore carries a `cs` field from day one, hard-coded to 0, so that the
-migration is a change to the region table and nothing else.
+**Hardware's current plan is one MRAM part on CS0 carrying both program and data.** So this does
+not happen, and §2.1 is the layout, permanently.
 
-> **Unverified.** The CS1 window base of `0x11000000` is per the RP2350 datasheet and is *not*
-> confirmed in this repo. Also unconfirmed: whether `flash_range_erase`/`flash_range_program`
-> drive CS1 correctly, since the bootrom bounds-checks against the `FLASH_DEVINFO` OTP entry and
-> only issues an XIP exit to CS1 when its recorded size is non-zero — which may require a
-> `flash_devinfo_set_cs_size(1, …)` call at boot. Settle both on hardware before relying on them.
+#### What that costs us
+
+The two-device layout was attractive for one reason, and it is worth being blunt about losing it:
+it made the central safety property **structural rather than arithmetic**. With storage on a
+different chip select, the write path *physically cannot address the program* — no bug, no
+miscomputed offset, no corrupted region table can reach it.
+
+On one shared device, "don't overwrite the program" goes back to being an offset comparison that
+code has to get right, every time, forever. That comparison is
+[§4.2](#42-the-checks) — the `STORAGE_BASE_OFFSET >= __flash_binary_end` runtime check and the
+bounds check on every call. Those were written as the *interim* guard for a bench setup. They are
+now the **only** thing standing between a storage bug and an unbootable satellite, for the life of
+the mission.
+
+Two consequences follow, and neither is optional:
+
+- §4.2's checks get reviewed as flight-critical code, not as scaffolding.
+- The `cs` field stays in `storage_region_t`, still hard-coded to `0`. It costs a byte and it
+  keeps this section cheap to reverse if hardware revisits the split.
+
+> **If the split is ever revived**, these were the open items, and they were never settled: the
+> CS1 window base of `0x11000000` is per the RP2350 datasheet and unconfirmed in this repo; and it
+> is unknown whether `flash_range_erase`/`flash_range_program` drive CS1 correctly, since the
+> bootrom bounds-checks against the `FLASH_DEVINFO` OTP entry and only issues an XIP exit to CS1
+> when its recorded size is non-zero — which may require `flash_devinfo_set_cs_size(1, …)` at boot.
 
 ---
 
 ## 3. Region map
 
-Sizes are generous relative to what we store. Space at the top of a 4 MB device is not the scarce
+Sizes are generous relative to what we store. Space at the top of the device is not the scarce
 resource; erase cycles and the ability to change our minds later are.
 
 | Region | Offset (from `STORAGE_BASE_OFFSET`) | Size | Purpose |
@@ -148,9 +195,17 @@ resource; erase cycles and the ability to change our minds later are.
 | `REGION_CONFIG_B` | `0x04000` | 16 KB | K/V bank B |
 | `REGION_LATCH` | `0x08000` | 4 KB | Write-once latched flags |
 | `REGION_SCRATCH` | `0x09000` | 4 KB | Firmware-update staging metadata |
-| — reserved — | `0x0A000` | 216 KB | Unallocated. Do not use without updating this table. |
+| — reserved — | `0x0A000` | 984 KB | Unallocated. Do not use without updating this table. |
 
-`STORAGE_BASE_OFFSET = PICO_FLASH_SIZE_BYTES - (256 * 1024)` = `0x3C0000`.
+Note what growing the reservation to 1024 KB did and did not do. It did **not** give the K/V store
+more room: one bank is live at a time, so config capacity is still one 16 KB bank minus a 32-byte
+header — about **16 KB of payload** — and the latch region still holds exactly **16 flags**, one
+per 256 B page. All 768 KB of the increase landed in the unallocated reserve.
+
+That is deliberate. The regions are sized by what they hold, not by what is available, and the
+reserve is the part that is *supposed* to be big: it is where the bulk-telemetry sink that §10
+flags as a real gap would go, and sizing that region now — before its write rate and ring-buffer
+semantics are designed — would be guessing. Keeping it unallocated keeps it honest.
 
 Every region is sector-aligned and a whole number of sectors, because 4 KB is the erase unit and a
 region that shares a sector with its neighbour cannot be erased without destroying the neighbour.
@@ -223,6 +278,13 @@ Enforced at **compile time**, in `static_assert`:
 - No two regions overlap.
 - The last region ends at or before `PICO_FLASH_SIZE_BYTES`.
 - `STORAGE_BASE_OFFSET` is sector-aligned.
+- **`PICO_FLASH_SIZE_BYTES > STORAGE_RESERVE_BYTES`**, with margin. Now that the base offset is
+  derived by subtraction ([§2.1](#21-one-qspi-device-on-cs0-shared-with-the-program)), a
+  device smaller than the reservation does not produce an error — it produces an *unsigned
+  wraparound*, and `STORAGE_BASE_OFFSET` lands somewhere near the top of the address space or, at
+  exactly equal sizes, at `0`, directly on top of the program. Neither is caught by any of the
+  checks above, because both are internally consistent. This assertion is what makes the
+  subtraction safe to write.
 
 Enforced at **`storage_init()`**, once, at boot, before the scheduler starts:
 
@@ -411,7 +473,7 @@ storage_err_t latch_set(latch_id_t id);      ///< Programs one page. Idempotent.
 
 | Path | Effect on storage regions |
 |---|---|
-| UF2 drag-and-drop | **Survives.** A UF2 rewrites only the sectors it contains; the program image does not extend to `0x3C0000`. |
+| UF2 drag-and-drop | **Survives.** A UF2 rewrites only the sectors it contains; the program image does not extend to `STORAGE_BASE_OFFSET`. |
 | `picotool load` | **Survives**, same reason. |
 | `picotool erase` / flash nuke | **Destroyed.** Whole-device erase. Expect to reprovision config afterwards. |
 | Debugger flash algorithm | **Usually destroyed** — most default to full-chip erase. Check the probe config before assuming a bench test proves persistence. |
@@ -419,8 +481,28 @@ storage_err_t latch_set(latch_id_t id);      ///< Programs one page. Idempotent.
 The in-flight firmware update path (`README.md`, *TASK: Deal with update requests*) stages an image
 and must **not** stage it into the storage regions. `REGION_SCRATCH` is for update *metadata* —
 sequence, length, CRC, state — not for the image payload. The image goes in the slack between
-`__flash_binary_end` and `STORAGE_BASE_OFFSET`, which is where the 256 KB top-anchored reservation
-earns its keep: staging cannot reach the config, and config cannot reach the staged image.
+`__flash_binary_end` and `STORAGE_BASE_OFFSET`, which is where the top-anchored reservation earns
+its keep: staging cannot reach the config, and config cannot reach the staged image.
+
+### 8.1 The image-size budget this imposes
+
+On the 2 MiB flight part, a 1024 KB reservation splits the device exactly in half, and the running
+program and the staged image must both fit in the lower half:
+
+```
+  program image  +  staged image  <=  STORAGE_BASE_OFFSET  =  1024 KB
+```
+
+So the practical ceiling on firmware size is **~512 KB**, and it is a ceiling on the *running*
+image, not on the update — the two are the same size in a like-for-like update. There is a lot of
+room against it today: the current release build is 25,480 bytes, about 5 % of budget.
+
+This is the number to watch, and it is the reason the reservation is worth revisiting rather than
+treating as settled. Storage is not consuming 1024 KB — it is allocating 40 KB and holding 984 KB
+in reserve ([§3](#3-region-map)) — so if the image ever approaches the ceiling, the cheapest fix is
+to shrink the reservation, not to fight the linker. Trading reserve for image headroom is a
+one-constant change *only if* nothing has quietly started using the reserve, which is the real
+reason [§3](#3-region-map) insists the reserve stay unallocated.
 
 ---
 
@@ -443,12 +525,17 @@ make a multi-byte update atomic against power loss mid-write. Power can still be
 3 and byte 4 of a value. Keep the banking, keep the header-last ordering, delete the erase calls
 and the wear discussion.
 
-Bring-up questions to answer on hardware, in order:
+Bring-up questions to answer on hardware, in order. Note that (1) is new and now dominates: with
+program and data on the same part ([§2.1](#21-one-qspi-device-on-cs0-shared-with-the-program)),
+the device has to be bootable, not merely readable and writable. A part that stores data
+beautifully but cannot be executed from is not a usable part under this plan.
 
-1. Does the part respond to standard `0x9F` JEDEC ID over QMI at all?
-2. Does it accept `0x02` page program and `0x03`/`0xEB` read like NOR, or does it need a
+1. **Does the RP2350 boot from it?** Does the bootrom's XIP setup and boot stage 2 bring the part
+   up as executable memory on CS0 — and if not, what does stage 2 need to become? Everything else
+   on this list is moot until this is yes.
+2. Does the part respond to standard `0x9F` JEDEC ID over QMI at all?
+3. Does it accept `0x02` page program and `0x03`/`0xEB` read like NOR, or does it need a
    different command set — i.e. can `hardware_flash` drive it, or does this need a QMI-level driver?
-3. Is it on CS1 as drawn, and does `flash_devinfo_set_cs_size(1, …)` make the SDK address it?
 4. Does erase (`0x20`) exist as a no-op, an error, or an unsupported command?
 
 Until (1)–(4) are answered, nothing in this document changes.
@@ -500,18 +587,89 @@ directly on SDK calls and should read continuously with them. It is a deliberate
 ## 11. Open questions
 
 Carried explicitly, in the style of the hardware document, so firmware assumptions do not outrun
-them:
+them. These are the *design's own* uncertainties. For the inputs this document cannot supply
+itself — things someone has to go and decide or measure — see [§12](#12-answers-needed).
 
-- **Is the CS1 window really at `0x11000000`, and can `hardware_flash` drive CS1?** (§2.2)
 - **What is the fitted flash part's worst-case sector erase time**, and what is the external
   watchdog timeout? Until both numbers exist, the §6 latency budget is an assumption, not a design.
-- Does `flash_devinfo_set_cs_size(1, …)` need calling at boot for a CS1 device, and does the
-  bootrom's `checked_flash_op` bounds-check cooperate?
-- Is 256 KB the right reservation? It is a guess biased toward "we will want room later"; the
-  firmware-update staging area (§8) is the thing most likely to change it.
+- ~~Is the CS1 window really at `0x11000000`, and can `hardware_flash` drive CS1?~~ Moot under the
+  one-device plan; retained in [§2.2](#22-not-the-plan--a-separate-data-device-on-cs1) in case the
+  split is revived.
+- **The drawing still says the wrong device size, and needs redrawing.** This document is sized
+  against a **2 MiB** part; `OwlSat Hardware block diagram.png` shows **2 Mb** — 2 mega*bit*,
+  256 KiB, an eightfold understatement. The transcription in `hardware_block_diagram.md` §2
+  carries a correction note rather than a silent edit, because that file's job is to say what the
+  image says. Until the image is fixed, anyone reading it alone will size firmware against a
+  device eight times too small. Not a design question — a task.
+- Is 1024 KB the right reservation? It is biased toward "we will want room later", and §3 is
+  candid that 984 KB of it is unallocated. The two things most likely to move it are the
+  firmware-update staging budget (§8.1) and the bulk-telemetry sink that §10 leaves unowned.
 - Should `REGION_SCRATCH` be readable by ground for post-mortem after a failed update?
 - Does the RTC (`hardware_block_diagram.md` §2) need a region for drift calibration, or does that
   fit as K/V keys? Probably keys.
 - RP2350 supports **partition tables** in the boot image (picobin/picotool). Should the storage
   reservation be declared there rather than as a bare offset constant, so `picotool` itself knows
   not to touch it? This would upgrade the §4.2 runtime check into something the tooling enforces.
+
+---
+
+## 12. Answers needed
+
+Distinct from [§11](#11-open-questions): those are design choices still to be made. These are
+**inputs from outside the document** — numbers to measure, decisions to take — that specific
+pieces of work are waiting on. Each says what it blocks, so it is clear what unsticks when it is
+answered.
+
+### A. The telemetry sink
+
+[§10](#10-what-this-replaces) removed the sensor/gyro logging task's storage and deliberately did
+not replace it. Writing that design needs five numbers, and none of them are firmware's to invent:
+
+1. **What is the sample rate, per stream, in Hz?** The single most load-bearing number here. It
+   decides append-only vs. a true ring buffer, how much of the §3 reserve the region takes, the
+   erase-scheduling strategy, and whether wear is a non-issue or a budget.
+2. **How many streams, and are they one record or several?** The 24 B figure discussed so far
+   looks like the 6-DOF IMU. Magnetometer, EUV ADC and the power monitors are separate sources at
+   plausibly different rates — one interleaved log or several regions is a structural choice, not
+   a detail.
+3. **Is the 24 B record fixed, or may it become 32 B?** 24 B does not divide the 4 KB erase unit;
+   32 B gives 128 records per sector exactly and leaves 8 B for a timestamp delta, sequence and
+   CRC. Trading ~25 % of capacity for self-describing, individually verifiable records is a good
+   deal, but it is a deal someone has to agree to.
+4. **How often does ground drain the log?** With (1), this sizes the region: the log must hold at
+   least one downlink interval, plus margin for missed passes.
+5. **When the log is full, is losing the oldest data acceptable?** Overwrite-oldest (ring) and
+   stop-and-preserve (fill-and-stop) are different designs and cannot both be built. For attitude
+   telemetry the answer is usually ring; for anything feeding an anomaly investigation it usually
+   is not.
+
+### B. Booting from the MRAM — hardware's to answer
+
+Now that program and data share one part ([§2.1](#21-one-qspi-device-on-cs0-shared-with-the-program)),
+the device is on the boot path, and this outranks everything else on this page.
+
+6. **Can the RP2350 boot from the fitted MRAM on CS0, and what does it take?** Stage 2, the read
+   command set, XIP configuration. Software's standing assumption is that the part behaves like a
+   2 MiB Pico-style NOR flash ([§0](#0-the-one-assumption-that-colours-everything)); this question
+   is the request to make that assumption true, or to tell us precisely how it is false. If the
+   answer is "it does not boot", the plan changes rather than the code — so an early *no* is worth
+   far more than a late *yes*.
+
+### C. The latency budget
+
+7. **What is the external watchdog timeout, in milliseconds?** [§6](#6-the-real-cost-of-a-write)
+   instructs the reader to budget erase time against it and then cannot supply it. Until this
+   number exists, "erase one sector per critical section" is a rule with no margin attached, and
+   *no* write path — config included, not just telemetry — can be signed off as safe.
+8. **Which flash/MRAM part is fitted, and what is its datasheet worst-case sector erase?** Also
+   carried in §11. Repeated here because it gates the same sign-off as (7): the ~45 ms typical /
+   400 ms worst case in §6 is marked **[flash-assumption]** and has never been checked against a
+   real part.
+
+### D. Build plumbing
+
+9. **How does `PICO_FLASH_SIZE_BYTES` get set for the flight board — a custom board header, or a
+   CMake define?** [§2.1](#21-one-qspi-device-on-cs0-shared-with-the-program) derives
+   `STORAGE_BASE_OFFSET` from it, and nothing overrides it today, so a build right now silently
+   uses the dev board's 4 MB and places storage at `0x300000`. Harmless on the bench, wrong on
+   flight hardware, and invisible either way.
