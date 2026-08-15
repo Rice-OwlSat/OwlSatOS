@@ -102,6 +102,10 @@ else. With SENS_PWR low, the ADC does not answer on the bus at all.
 > readable and writable. Confirming that the RP2350 boots from it — stage 2, read command set, XIP
 > setup — is the item everything else waits on. Firmware's standing assumption until told
 > otherwise is that the part behaves identically to the 2 MiB NOR flash on a Pico.
+>
+> Firmware consequences: `storage_api.md` §2.1 (layout and the 1024 KB reservation), §2.2 (what
+> the single-device plan costs, and why the §4.2 bounds checks are now flight-critical rather than
+> scaffolding), and §12 (the questions this raises).
 - 4x neopixel for debug, 1 debug LED, boot / reset / user buttons.
 
 ### Watchdog
