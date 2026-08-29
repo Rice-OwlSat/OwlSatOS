@@ -61,7 +61,10 @@ project(OwlSatOS C CXX ASM)
 
 pico_sdk_init()
 
-FILE(GLOB OWLSAT_SOURCES src/*.c src/*.cpp)
+# CONFIGURE_DEPENDS makes the build system re-run the glob on every build, so adding a file to
+# src/ picks it up without a manual re-configure. Without it, a new source silently does not
+# compile and surfaces as an undefined reference at link time.
+FILE(GLOB OWLSAT_SOURCES CONFIGURE_DEPENDS src/*.c src/*.cpp)
 
 add_executable(OwlSatOS ${OWLSAT_SOURCES})
 
