@@ -11,6 +11,7 @@
 
 #include <OwlSat/config.h>
 #include <OwlSat/hal.h>
+#include <OwlSat/ltm1_link.h>
 #include <OwlSat/storage_table.h>
 #include <OwlSat/tasks.h>
 #include <OwlSat/watchdog.h>
@@ -51,6 +52,11 @@ namespace OwlSat {
 
     for (;;) {
       Watchdog::CheckIn(Watchdog::Client::Link);
+
+      // Drain the bus before asking. The LTM announces its operational mode rather than
+      // answering questions about it, and mode is one of the three things readiness is derived
+      // from — so a status message left sitting in the receive queue is a stale answer below.
+      Ltm1::PollInbound();
 
       Hal::LinkStatus status = {};
       const bool queried = Hal::RadioQueryReady(&status);

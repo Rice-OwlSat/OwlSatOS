@@ -18,10 +18,19 @@
               struct padding or on the ground station being built the same way. The cost is one
               serializer; the alternative is a format that changes when someone reorders a field.
 
-  @warning    The framing below is provisional. The README makes agreeing it with the comms team
-              a precondition for the telemetry task, and the AMSAT LTM-1 is reached over CAN via
-              an SPI bridge, which may impose its own packetisation (AX.25 is the likely
-              standard). Treat OwlSatFrame as the shape of a frame, not as the agreed frame.
+  @note       The AMSAT LTM ICD v2.3 settles what this frame is for, and it is not what reaches
+              the radio. OwlSat is the ICD's host platform; the LTM owns the RF framing, the CRC,
+              the Reed-Solomon FEC and the BPSK downlink, and takes host data as CAN messages.
+              There is no AX.25 on this interface — the earlier guess to that effect is gone.
+
+              OwlSatFrame survives as OwlSat's own container: Ltm1::ChunkFrameToScience() splits
+              it across science CAN messages that the LTM carries opaquely and the ground
+              reassembles. The CRC-16 below is now an end-to-end check over the CAN hop and the
+              reassembly, which the LTM's own checks do not cover. See
+              docs/internal/ltm1_link_design.md.
+
+  @warning    The layout is still provisional in the sense that matters: the ground parser has to
+              agree with it. Bump OWLSAT_FRAME_VERSION on any change.
 
   @author     Viola Case
   @date       29.08.2026

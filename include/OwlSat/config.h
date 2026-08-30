@@ -150,3 +150,75 @@
 
 /// Frames handed to the radio in a single transmit pass, before yielding.
 #define OWLSAT_PACKET_BURST_LIMIT 8u
+
+
+// ---------------------------------------------------------------------------
+// AMSAT LTM-1 link  (see include/OwlSat/ltm1.h and docs/internal/ltm1_link_design.md)
+//
+// Only the values the ICD leaves to the host are here. The destination field, the LTM's own
+// source id and the Table 7/8 message ids are fixed by the ICD and live as constants in ltm1.h
+// — putting them here would suggest they are ours to tune, and they are not.
+// ---------------------------------------------------------------------------
+
+/**
+ * CAN identifier source field for this host (ICD Table 6, bits 23:20).
+ *
+ * The ICD requires 8 or above whenever the destination is the LTM, and leaves the specific
+ * value to the host. 8 is the bottom of the permitted range; nothing else shares this bus.
+ */
+#define OWLSAT_LTM_SOURCE_ID 8u
+
+/**
+ * Bus bit rate [bit/s]. Fixed by the ICD at 125k, not a tuning knob — it is here so the CAN
+ * controller driver has one place to read it from rather than a literal in a bit-timing table.
+ */
+#define OWLSAT_LTM_CAN_BITRATE 125000u
+
+/**
+ * Priority fields (ICD Table 6, bits 28:24). Lower wins CAN arbitration.
+ *
+ * Both sides are required to accept any priority and to ignore it when interpreting a message,
+ * so these only order our own traffic against itself. Mode coordination outranks health, and
+ * health outranks bulk science: losing a science chunk to arbitration costs one frame, losing a
+ * safe-mode request costs the power margin it was asking for.
+ */
+#define OWLSAT_LTM_PRIORITY_STATUS  1u
+#define OWLSAT_LTM_PRIORITY_HEALTH  8u
+#define OWLSAT_LTM_PRIORITY_SCIENCE 16u
+
+/**
+ * Type field for OwlSat science (ICD Table 6, bits 19:16). Default 10 = health-mode realtime
+ * plus Whole Orbit Data.
+ *
+ * The alternative worth knowing about is 2 — realtime only, no WOD. Realtime alone means science
+ * acquired outside a ground station pass is downlinked into an empty sky and gone, which is
+ * exactly the loss the storage table upstream exists to prevent; carrying it into the LTM's WOD
+ * buffer keeps it alive across passes. The cost is LTM buffer the ICD marks TBS, so if AMSAT
+ * comes back with a tight WOD budget this is the macro that changes.
+ *
+ * Values are OwlSat::Ltm1::MsgType. Not an enum here because config.h predates that header.
+ */
+#define OWLSAT_LTM_SCIENCE_TYPE 10u
+
+/// Emit science as opaque chunked OwlSatFrames (path A). See ltm1.h.
+#define OWLSAT_LTM_SEND_SCIENCE 1
+
+/// Emit host state as ICD Table 8 health telemetry for FoxTelem (path B). See ltm1.h.
+#define OWLSAT_LTM_SEND_HEALTH 1
+
+/**
+ * Messages the link layer hands the controller in one call before yielding.
+ *
+ * A full frame is SCIENCE_MAX_MESSAGES chunks and the controller has only a few TX mailboxes,
+ * so a burst larger than this just spins on a full queue.
+ */
+#define OWLSAT_LTM_TX_BURST 8u
+
+/**
+ * Messages drained from the receive queue per link-task poll.
+ *
+ * A bound, not a target. The LTM speaks rarely — mode changes and passed-through commands — so
+ * this is normally never reached; it exists so that a controller wedged reporting a permanently
+ * non-empty queue cannot hold the link task past its watchdog deadline.
+ */
+#define OWLSAT_LTM_RX_BURST 8u

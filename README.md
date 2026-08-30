@@ -83,16 +83,32 @@ power does. The points below are all still open:
 - For config updates: write to a reserved config file on the FAT12 volume and reload the in-memory config
 - For firmware updates: stage the payload in flash, verify integrity (CRC or checksum), then reboot into the new image via the RP2350 bootrom — the current image must remain valid until the new one passes verification
 
-### TASK: Serialize and transmit actual data
-A provisional frame format, a serializer and the `tx` task are on master — see
-`include/OwlSat/telemetry.h`. **The format is not agreed**, which is the item that blocks the
-rest:
-- Coordinate with the comms team on baud rate, framing, and packetization (COBS, SLIP, etc.).
-  The LTM-1 is reached over CAN via an SPI bridge and may impose its own packetisation; AX.25
-  appears to be the standard. Until that is settled, treat `OwlSatFrame` as the *shape* of a
-  frame, not the frame.
+### TASK: Serialize and transmit actual data (`radio` branch)
+**The framing question is answered.** The AMSAT LTM ICD v2.3 makes OwlSat the *host platform*,
+not the radio: the LTM owns the 665-byte frames, the CRC, the Reed-Solomon FEC and the 1200 bps
+BPSK downlink. There is no AX.25 on this interface. Our job is CAN messages at 125 kbit/s with
+the 29-bit identifier layout from ICD Table 6. See `docs/internal/ltm1_link_design.md`.
+
+Done on the `radio` branch:
+- Protocol layer (`include/OwlSat/ltm1.h`, `src/ltm1_can_id.cpp`) — identifier codec, science
+  chunking, ICD Table 8 health telemetry, with the ICD's addressing rules enforced as
+  `static_assert`s rather than comments
+- `Hal::RadioInit/RadioQueryReady/RadioSendPacket` implemented in `src/ltm1_link.cpp`; the radio
+  section of `hal_stub.cpp` is gone. Nothing above `hal.h` changed
+- `OwlSatFrame` retained as OwlSat's own container, chunked across opaque science messages
+
+Still open:
+- **Select the SPI CAN controller part** — this blocks everything else. `MCP2515` vs `MCP2518FD`
+  share no register map, so `src/can_controller_stub.cpp` reports honest absence until it is
+  chosen, and the link still comes up `DOWN`
+- Decide whether both transmit paths survive — opaque science (`OWLSAT_LTM_SEND_SCIENCE`) and
+  ICD Table 8 health for FoxTelem (`OWLSAT_LTM_SEND_HEALTH`) are both compiled in for now
+- Fill a `Ltm1::HealthSnapshot` from real sensors once the power/thermal branches merge; nothing
+  calls `Ltm1::PublishHealth()` yet
 - Bump `OWLSAT_FRAME_VERSION` on any layout change — the ground parser branches on it
-- Wire `Hal::RadioSendPacket()` to the real link on the `radio` branch
+- Hardware items the ICD raises and the block diagram does not answer — no 5 V rail for the
+  LTM, `Umbilical Attached` must be held low in flight, LTM-as-I2C-master conflicts with I2C0.
+  All listed in §8 of the design doc
 
 ### TASK: Battery management
 - Poll battery

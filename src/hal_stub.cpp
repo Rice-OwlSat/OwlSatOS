@@ -2,8 +2,11 @@
  * @file hal_stub.cpp
  * @brief No-op implementation of the OwlSatOS hardware facade.
  *
- * Placeholder for the peripheral drivers being written on the `sxuv5-interface`, `storage` /
- * `nonvolatile-data-storage` and `radio` branches. Every call here reports absence or failure.
+ * Placeholder for the peripheral drivers being written on the `sxuv5-interface` and `storage` /
+ * `nonvolatile-data-storage` branches. Every call here reports absence or failure.
+ *
+ * The radio section is gone: it lives in src/ltm1_link.cpp now, against the AMSAT LTM-1 CAN
+ * interface. What remains stubbed for the radio is the CAN controller one layer below it.
  *
  * @par Why these do not return fake data
  * A stub that handed back a plausible irradiance, or claimed the radio was ready, would make the
@@ -18,9 +21,6 @@
  */
 
 #include <cstdio>
-
-#include "FreeRTOS.h"
-#include "task.h"
 
 #include <OwlSat/hal.h>
 
@@ -77,32 +77,12 @@ namespace OwlSat::Hal {
 
   // -----------------------------------------------------------------------
   // Radio
+  //
+  // MERGED. RadioInit(), RadioQueryReady() and RadioSendPacket() now live in src/ltm1_link.cpp,
+  // implemented against the AMSAT LTM-1 over CAN. What is still stubbed there is one layer
+  // lower — the SPI-attached CAN controller in src/can_controller_stub.cpp, whose part has not
+  // been selected — so this build still reports an honest LinkState::Down.
   // -----------------------------------------------------------------------
-
-  bool RadioInit() {
-    // MERGE: radio -> assert RADIO_PWR, bring up SPI0 and the CAN bridge to the LTM-1.
-    printf("[hal] RadioInit: no radio driver in this build (branch radio)\n");
-    return false;
-  }
-
-  bool RadioQueryReady(LinkStatus *out) {
-    // MERGE: radio -> query the LTM-1's transmit queue depth over CAN.
-    if (out != nullptr) {
-      // Unknown, not Down: this build cannot distinguish a radio that is off from one that is
-      // absent, and reporting Down would assert something the stub has not established.
-      out->state       = LinkState::Unknown;
-      out->frames_free = 0;
-      out->uptime_ms   = static_cast<uint32_t>(pdTICKS_TO_MS(xTaskGetTickCount()));
-    }
-    return false;
-  }
-
-  bool RadioSendPacket(const uint8_t *frame, size_t len) {
-    // MERGE: radio -> segment the frame across CAN and hand it to the LTM-1.
-    (void) frame;
-    (void) len;
-    return false;
-  }
 
 
   // -----------------------------------------------------------------------
