@@ -40,6 +40,28 @@
 #define INCLUDE_vTaskPrioritySet                1
 #define INCLUDE_uxTaskPriorityGet               1
 #define INCLUDE_vTaskSuspend                    1
+#define INCLUDE_xTaskDelayUntil                 1   // Fixed-cadence pacing. The periodic tasks
+                                                    // (sensor, link, watchdog) use this rather
+                                                    // than vTaskDelay so their period does not
+                                                    // drift by however long the work took.
+
+// --- Synchronisation primitives ---
+#define configUSE_MUTEXES                       1   // Storage table lock. Mutexes, not binary
+                                                    // semaphores: only a mutex does priority
+                                                    // inheritance, and the transmit task at
+                                                    // priority 2 shares this lock with the
+                                                    // sensor task at priority 1.
+#define configUSE_RECURSIVE_MUTEXES             0   // Nothing re-enters a held lock. Off.
+
+// --- Fault detection ---
+// Both of these need an application hook, implemented at the bottom of OwlSatOS.cpp. Each halts
+// without pulsing WDT_WDI, so the external watchdog resets the board.
+#define configCHECK_FOR_STACK_OVERFLOW          2   // Method 2: pattern-fill the stack at create
+                                                    // and check it on every context switch.
+                                                    // Costs a few cycles per switch and catches
+                                                    // the overflows method 1 walks straight past.
+#define configUSE_MALLOC_FAILED_HOOK            1   // A silent xTaskCreate failure at boot is a
+                                                    // subsystem that never runs and never says so.
 
 // --- Assertion handler ---
 #define configASSERT(x) if((x) == 0) { portDISABLE_INTERRUPTS(); for(;;); }

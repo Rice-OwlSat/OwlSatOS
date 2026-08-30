@@ -13,9 +13,47 @@ OwlSat flight software, written in C/C++ for the **RP2350** (Raspberry Pi Pico 2
 
 ## What is currently working (master)
 - FreeRTOS scheduler running on RP2350 Cortex-M33 @ 133 MHz
-- `BoardLEDTask` — 250 ms heartbeat blink on the onboard LED
-- `ReadButtonTask` — debounce-free polling of a pushbutton on GPIO 16; prints press/release over UART
-- UART stdio enabled; USB stdio disabled
+- USB stdio enabled; UART stdio disabled (see `pico_enable_stdio_*` in `CMakeLists.txt`)
+- `blink` — 500 ms heartbeat on the onboard LED
+- The barebones flight task set, described below
+
+### The task layer
+Five tasks, created in `main()` and paced against the scheduler:
+
+| Task | Source | Priority | Cadence | Does |
+|---|---|---|---|---|
+| `sensor` | `src/sensor_task.cpp` | 1 | 5 s | Acquires the EUV array, appends to the storage table |
+| `link` | `src/link_task.cpp` | 1 | 1 s | Asks the radio whether it will accept frames; publishes `EVT_LINK_READY` |
+| `tx` | `src/transmit_task.cpp` | 2 | on demand | Packs pending records into frames, hands them to the radio |
+| `wdt` | `src/watchdog_task.cpp` | 2 | 250 ms | Pulses `WDT_WDI` while the three above keep checking in |
+| `blink` | `src/OwlSatOS.cpp` | 1 | 500 ms | Onboard-LED heartbeat |
+
+Everything they can be tuned by lives in `include/OwlSat/config.h`.
+
+**The hardware drivers are not on this branch.** `sensor`, `link` and `tx` talk to hardware only
+through `include/OwlSat/hal.h`, and every function in it is stubbed in `src/hal_stub.cpp` to
+report failure — the EUV chain is on `sxuv5-interface`, the store on `storage` /
+`nonvolatile-data-storage`, the radio on `radio`. Each stub carries a `MERGE:` comment naming the
+call that replaces it. Nothing above `hal.h` should need to change when they land.
+
+So this build boots, runs the whole task graph, and honestly reports that it acquired nothing,
+stored nothing durably and transmitted nothing. The stubs return failure rather than plausible
+data on purpose: a stub that invented an irradiance would make the task layer look correct while
+proving nothing about it.
+
+### Two pieces worth knowing about before touching them
+
+**The storage table** (`include/OwlSat/storage_table.h`) is a fixed ring, not a queue. With the
+downlink stalled a queue would eventually block the sensor task and stop the science; the ring
+drops the *oldest* record instead and counts the drop. Science acquisition never waits on the
+radio. Records are marked downlinked only after the radio accepts the frame carrying them.
+
+**The watchdog** (`include/OwlSat/watchdog.h`) does not simply kick on a timer. The block diagram
+already notes that a task-driven kick proves more than a timer-driven one; this goes one step
+further and gates the kick on check-ins, so `WDT_WDI` keeps pulsing only while *every* registered
+task is still inside its deadline. A sensor task wedged forever on I2C stops the pulse train and
+the external circuit resets the board. Deadlines are derived from the task periods in `config.h`,
+not written independently, so retuning a period cannot arm a spurious reset.
 
 
 ## Tasks on the GANTT that still need to be done
@@ -27,6 +65,9 @@ Need to rewrite this section
 
 ### TASK: Parse and store sensor/gyro data
 Depends on the filesystem layer above being merged first.
+The `sensor` task and the in-RAM storage table are already on master; what is missing is the
+durable half — `Hal::StorageAppend()` currently returns false, so records survive only as long as
+power does. The points below are all still open:
 - Add a FreeRTOS task that reads from the satellite's sensors (gyroscope, temperature, etc.) on a fixed interval and writes records to the active day-file on the FAT12 volume
 - Every 24 hours, close the current file and open a new one; use a FreeRTOS software timer (`xTimerCreate`) for the rollover — do not block the sensor task on a 24-hour delay
 - FAT12 root directory holds at most 64 entries (hard limit set in the boot sector) — the naming/rotation scheme must stay within that limit
@@ -43,10 +84,15 @@ Depends on the filesystem layer above being merged first.
 - For firmware updates: stage the payload in flash, verify integrity (CRC or checksum), then reboot into the new image via the RP2350 bootrom — the current image must remain valid until the new one passes verification
 
 ### TASK: Serialize and transmit actual data
-- Define a binary telemetry frame format (header, timestamp, sensor fields, checksum) — document it in `include/telemetry.h`
-- Implement a serializer that packs sensor readings into frames
-- Add a telemetry transmit task that pulls from a FreeRTOS queue and sends frames over UART or the RF interface
-- Coordinate with the comms team on baud rate, framing, and packetization (COBS, SLIP, etc.) before writing the transmit path
+A provisional frame format, a serializer and the `tx` task are on master — see
+`include/OwlSat/telemetry.h`. **The format is not agreed**, which is the item that blocks the
+rest:
+- Coordinate with the comms team on baud rate, framing, and packetization (COBS, SLIP, etc.).
+  The LTM-1 is reached over CAN via an SPI bridge and may impose its own packetisation; AX.25
+  appears to be the standard. Until that is settled, treat `OwlSatFrame` as the *shape* of a
+  frame, not the frame.
+- Bump `OWLSAT_FRAME_VERSION` on any layout change — the ground parser branches on it
+- Wire `Hal::RadioSendPacket()` to the real link on the `radio` branch
 
 ### TASK: Battery management
 - Poll battery
