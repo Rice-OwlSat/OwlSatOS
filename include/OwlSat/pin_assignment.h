@@ -1,8 +1,11 @@
 /**
 
   @file       pin_assignment.h
-  @brief
-  @details    ~
+  @brief      GPIO, bus and address assignments for every peripheral OwlSatOS drives.
+  @details    All peripheral identity lives behind the macros in this file, per
+              docs/internal/sxuv5.md §5, so a harness change is a one-file edit. Pin numbers are
+              placeholders until the harness drawing is released; the grouping and the names
+              follow "OwlSat Hardware block diagram.png".
   @author     Viola Case
   @date       17.06.2026
   @copyright  © Viola Case, 2026. All rights reserved.
@@ -10,6 +13,8 @@
 **/
 #pragma once
 
+/// Legacy debug lines from the first bring-up. Not part of the EUV chain; retained until the
+/// harness drawing says what GPIO 0 and 1 are for.
 #define DIODE_PIN_DATA  0
 #define DIODE_PIN_CLOCK 1
 
