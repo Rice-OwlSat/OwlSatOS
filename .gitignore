@@ -1,6 +1,7 @@
-build
+build*/
 !.vscode/*
-.claude
-docs/html
-docs/latex
-.idea
+.claude/
+docs/html/
+docs/latex/
+.idea/
+.cache/
