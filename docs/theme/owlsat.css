@@ -1,0 +1,616 @@
+/*
+ * OwlSatOS documentation theme.
+ *
+ * Loaded through HTML_EXTRA_STYLESHEET, so it only overrides doxygen's own
+ * stylesheet. Nearly everything here is a redefinition of a doxygen CSS
+ * custom property, which keeps the theme working across doxygen updates.
+ */
+
+/* ---------------------------------------------------------------- palette */
+
+html {
+  /* brand navy, sampled from the OwlSat mark */
+  --owl-navy:        #232d65;
+  --owl-navy-deep:   #161d43;
+  --owl-navy-soft:   #3c4a8f;
+  --owl-accent:      #4c63c4;
+  --owl-ink:         #1b2030;
+  --owl-muted:       #5b657f;
+  --owl-surface:     #f6f7fb;
+  --owl-surface-alt: #eef0f8;
+  --owl-line:        #dfe3ef;
+
+  --owl-radius:      10px;
+  --owl-radius-sm:   6px;
+  --owl-shadow:      0 1px 2px rgba(22, 29, 67, .06), 0 6px 20px rgba(22, 29, 67, .05);
+
+  --font-family-normal: "Inter", system-ui, -apple-system, "Segoe UI", Roboto,
+                        "Helvetica Neue", Arial, sans-serif;
+  --font-family-monospace: "JetBrains Mono", "Cascadia Mono", Consolas,
+                           "SF Mono", "Ubuntu Mono", monospace;
+
+  --page-foreground-color: var(--owl-ink);
+  --page-link-color: var(--owl-accent);
+  --page-visited-link-color: var(--owl-accent);
+  --page-external-link-color: var(--owl-navy-soft);
+
+  --title-background-color: #ffffff;
+  --title-separator-color: var(--owl-line);
+  --header-background-color: transparent;
+  --header-separator-color: var(--owl-line);
+  --group-header-color: var(--owl-navy);
+  --group-header-separator-color: var(--owl-line);
+  --separator-color: var(--owl-line);
+  --directory-separator-color: var(--owl-line);
+
+  --index-odd-item-bg-color: var(--owl-surface);
+  --index-even-item-bg-color: #ffffff;
+  --index-header-color: var(--owl-navy);
+  --index-separator-color: var(--owl-line);
+
+  --blockquote-background-color: var(--owl-surface);
+  --blockquote-border-color: var(--owl-accent);
+
+  --memdecl-background-color: var(--owl-surface);
+  --memdecl-separator-color: var(--owl-line);
+  --memdecl-border-color: var(--owl-line);
+  --memdecl-foreground-color: var(--owl-muted);
+  --memdecl-template-color: var(--owl-navy-soft);
+
+  --memdef-border-color: var(--owl-line);
+  --memdef-title-background-color: var(--owl-surface-alt);
+  --memdef-proto-background-color: var(--owl-surface);
+  --memdef-proto-text-color: var(--owl-navy);
+  --memdef-doc-background-color: #ffffff;
+  --memdef-param-name-color: #8a4a2a;
+  --memdef-template-color: var(--owl-navy-soft);
+
+  --table-cell-border-color: var(--owl-line);
+  --table-header-background-color: var(--owl-navy);
+  --table-header-foreground-color: #ffffff;
+
+  --label-background-color: var(--owl-navy-soft);
+  --label-left-top-border-color: var(--owl-navy-soft);
+  --label-right-bottom-border-color: var(--owl-navy-soft);
+  --label-foreground-color: #ffffff;
+
+  --nav-background-color: var(--owl-surface);
+  --nav-foreground-color: var(--owl-navy);
+  --nav-border-color: var(--owl-line);
+  --nav-breadcrumb-color: var(--owl-navy);
+  --nav-breadcrumb-border-color: var(--owl-line);
+  --nav-breadcrumb-separator-color: var(--owl-line);
+  --nav-breadcrumb-active-bg: var(--owl-surface-alt);
+  --nav-splitbar-bg-color: var(--owl-line);
+  --nav-splitbar-handle-color: var(--owl-navy-soft);
+  --nav-text-normal-color: var(--owl-ink);
+  --nav-text-hover-color: #ffffff;
+  --nav-text-active-color: #ffffff;
+  --nav-menu-button-color: var(--owl-navy);
+  --nav-menu-background-color: #ffffff;
+  --nav-menu-foreground-color: var(--owl-ink);
+  --nav-menu-active-bg: var(--owl-surface-alt);
+  --nav-arrow-color: #a7b0c8;
+  --nav-arrow-selected-color: var(--owl-navy-soft);
+  --nav-font-size-level1: 13.5px;
+  --nav-font-size-level2: 12.5px;
+  --nav-font-size-level3: 12px;
+
+  --toc-background-color: var(--owl-surface);
+  --toc-border-color: var(--owl-line);
+  --toc-header-color: var(--owl-navy);
+
+  --fragment-background-color: var(--owl-surface);
+  --fragment-border-color: var(--owl-line);
+  --fragment-foreground-color: var(--owl-ink);
+  --fragment-lineno-background-color: var(--owl-surface-alt);
+  --fragment-lineno-foreground-color: #97a0b8;
+  --fragment-lineno-border-color: transparent;
+
+  --code-keyword-color: #0f7a52;
+  --code-type-keyword-color: #7a4d1d;
+  --code-flow-keyword-color: #b25000;
+  --code-comment-color: #8a8f9e;
+  --code-preprocessor-color: #7a5c14;
+  --code-string-literal-color: #1f3fa8;
+  --code-char-literal-color: #0f6f6f;
+  --code-link-color: var(--owl-accent);
+  --code-external-link-color: var(--owl-accent);
+
+  --search-box-border-color: var(--owl-line);
+  --search-background-color: #ffffff;
+  --search-foreground-color: var(--owl-muted);
+  --search-active-color: var(--owl-ink);
+
+  --scrollbar-thumb-color: #c9cfe0;
+  --scrollbar-background-color: var(--owl-surface);
+
+  --icon-background-color: var(--owl-navy-soft);
+  --icon-foreground-color: #ffffff;
+  --icon-folder-fill-color: #c8cee6;
+  --icon-folder-open-fill-color: #aab3d6;
+  --icon-folder-border-color: var(--owl-navy-soft);
+  --icon-doc-fill-color: #d7dbec;
+  --icon-doc-border-color: var(--owl-navy-soft);
+
+  --footer-foreground-color: var(--owl-muted);
+  --citation-label-color: var(--owl-navy-soft);
+}
+
+/* -------------------------------------------------------------- dark mode */
+
+html.dark-mode {
+  --owl-ink:         #dfe3f2;
+  --owl-muted:       #98a2bd;
+  --owl-accent:      #8fa4f0;
+  --owl-navy:        #aab6ea;
+  --owl-navy-soft:   #6e7fc4;
+  --owl-surface:     #161a27;
+  --owl-surface-alt: #1d2233;
+  --owl-line:        #2a3048;
+  --owl-shadow:      0 1px 2px rgba(0, 0, 0, .4), 0 6px 20px rgba(0, 0, 0, .35);
+
+  --page-background-color: #0e111a;
+  --title-background-color: #10141f;
+  --memdef-doc-background-color: transparent;
+  --memdef-param-name-color: #d3a06f;
+  --index-even-item-bg-color: transparent;
+  --nav-background-color: #10141f;
+  --nav-menu-background-color: #121621;
+  --search-background-color: #121621;
+  --table-header-background-color: #29325e;
+  --table-header-foreground-color: #dfe3f2;
+  --label-background-color: #303a6b;
+  --label-foreground-color: #dfe3f2;
+  --scrollbar-thumb-color: #303752;
+  --icon-folder-fill-color: #3b4570;
+  --icon-folder-open-fill-color: #4c5892;
+  --icon-doc-fill-color: #333c60;
+  --code-keyword-color: #6fd39b;
+  --code-type-keyword-color: #d3a06f;
+  --code-flow-keyword-color: #f0a86a;
+  --code-comment-color: #78829c;
+  --code-preprocessor-color: #c9b06a;
+  --code-string-literal-color: #93b4ff;
+  --code-char-literal-color: #6fd0d0;
+}
+
+/* the mark is flat navy on transparent; make it read on a dark page */
+html.dark-mode #projectlogo img {
+  filter: brightness(0) invert(1);
+  opacity: .92;
+}
+
+/* ---------------------------------------------------------- base + rhythm */
+
+body {
+  font-family: var(--font-family-normal);
+  font-size: 15px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+p, li, dd { line-height: 1.65; }
+
+a { text-decoration: none; }
+a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ------------------------------------------------------------- masthead */
+
+#titlearea {
+  padding: 18px 24px 16px;
+  background: var(--title-background-color);
+  border-bottom: 1px solid var(--title-separator-color);
+}
+
+#titlearea table { width: 100%; }
+
+#projectlogo img {
+  max-height: 52px;
+  width: auto;
+  padding-right: 14px;
+}
+
+#projectname {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -.015em;
+  color: var(--owl-navy);
+}
+
+#projectnumber {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--owl-muted);
+  vertical-align: middle;
+}
+
+#projectbrief {
+  font-size: 13.5px;
+  color: var(--owl-muted);
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------- top tabs */
+
+.sm-dox {
+  background: var(--owl-surface);
+  border-bottom: 1px solid var(--owl-line);
+}
+
+.sm-dox a,
+.sm-dox a:focus,
+.sm-dox a:hover,
+.sm-dox a:active {
+  background-image: none;
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--owl-ink);
+  border-radius: var(--owl-radius-sm);
+  text-shadow: none;
+}
+
+.sm-dox a:hover,
+.sm-dox a:focus {
+  background: var(--owl-navy);
+  color: #fff;
+  text-decoration: none;
+}
+
+/* breadcrumb strip under the tabs */
+#nav-path ul {
+  background: transparent;
+  border-top: 1px solid var(--owl-line);
+  font-size: 12px;
+}
+
+#nav-path li.navelem a { color: var(--owl-muted); font-weight: 500; }
+
+/* ------------------------------------------------------------- side tree */
+
+#side-nav { background: var(--nav-background-color); }
+
+#nav-tree {
+  padding-top: 8px;
+  font-size: 13.5px;
+  background: transparent;
+}
+
+#nav-tree .item { line-height: 1.9; }
+
+#nav-tree a { color: var(--nav-text-normal-color); }
+
+#nav-tree .selected {
+  background-image: none;
+  background: var(--owl-navy);
+  border-radius: var(--owl-radius-sm);
+  text-shadow: none;
+}
+
+#nav-tree .selected a { color: #fff; }
+
+#nav-tree div.item:hover {
+  background: var(--owl-surface-alt);
+  border-radius: var(--owl-radius-sm);
+}
+
+.ui-resizable-e { background: var(--owl-line); width: 1px; }
+
+/* -------------------------------------------------- right-hand page outline */
+
+#page-nav {
+  background: transparent;
+  border-left: 1px solid var(--owl-line);
+}
+
+#page-nav-contents { padding-top: 22px; }
+
+ul.page-outline div.item {
+  font-family: var(--font-family-normal);
+  font-size: 12.5px;
+  line-height: 1.5;
+  padding: 4px 12px 4px 8px;
+  border-left: 2px solid transparent;
+}
+
+/* long headings should wrap in the outline rather than be clipped, and the
+   wrapped line has to stay clear of the arrow column */
+ul.page-outline li { white-space: normal; }
+
+ul.page-outline div.item {
+  display: flex;
+  align-items: flex-start;
+}
+
+ul.page-outline div.item > span.arrow { flex: 0 0 auto; }
+
+ul.page-outline a { color: var(--owl-muted); }
+ul.page-outline a:hover { color: var(--owl-accent); text-decoration: none; }
+
+ul.page-outline li.vis { background-color: transparent; }
+
+ul.page-outline li.vis > div.item {
+  border-left-color: var(--owl-accent);
+  color: var(--owl-navy);
+}
+
+ul.page-outline li.vis > div.item a { color: var(--owl-navy); font-weight: 600; }
+
+/* ------------------------------------------------------------ page frame */
+
+div.contents,
+div.header {
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
+  padding-left: 28px;
+  padding-right: 28px;
+}
+
+div.header {
+  background: transparent;
+  border-bottom: none;
+  padding-top: 22px;
+}
+
+div.headertitle { padding: 0; }
+
+div.title {
+  font-size: 30px;
+  font-weight: 680;
+  letter-spacing: -.02em;
+  color: var(--owl-navy);
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--owl-line);
+}
+
+div.contents { padding-top: 6px; padding-bottom: 64px; }
+
+/* -------------------------------------------------------------- headings */
+
+h1, h2, h3, h4 {
+  font-weight: 640;
+  letter-spacing: -.012em;
+  color: var(--owl-navy);
+}
+
+h1.groupheader,
+h2.groupheader {
+  color: var(--owl-navy);
+  font-size: 20px;
+  border-bottom: 1px solid var(--owl-line);
+  padding-bottom: 6px;
+  margin-top: 34px;
+}
+
+.textblock h1 { font-size: 24px; margin-top: 32px; }
+.textblock h2 { font-size: 20px; margin-top: 28px; }
+.textblock h3 { font-size: 16.5px; margin-top: 22px; }
+
+h2.memtitle {
+  background: var(--memdef-title-background-color);
+  border: 1px solid var(--owl-line);
+  border-bottom: none;
+  border-radius: var(--owl-radius) var(--owl-radius) 0 0;
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--owl-navy);
+  padding: 8px 14px;
+}
+
+/* --------------------------------------------------------------- members */
+
+table.memberdecls {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--owl-line);
+  border-radius: var(--owl-radius);
+  overflow: hidden;
+  width: 100%;
+  margin-bottom: 26px;
+}
+
+table.memberdecls td.memSeparator:last-child,
+table.memberdecls tr:last-child .memSeparator { border-bottom: none; }
+
+/* the section heading is a row inside the table; let it read as a card header */
+table.memberdecls tr.heading > td { padding: 0; }
+
+table.memberdecls h2.groupheader {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 15px;
+  background: var(--owl-surface-alt);
+  border-bottom: 1px solid var(--owl-line);
+}
+
+table.memberdecls td.memItemLeft,
+table.memberdecls td.memItemRight,
+table.memberdecls td.mdescLeft,
+table.memberdecls td.mdescRight {
+  background: var(--owl-surface);
+  border: none;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+table.memberdecls .memSeparator {
+  border-bottom: 1px solid var(--owl-line);
+  height: 1px;
+  line-height: 1px;
+}
+
+.memitem {
+  margin-bottom: 26px;
+  box-shadow: var(--owl-shadow);
+  border-radius: var(--owl-radius);
+}
+
+.memproto {
+  background: var(--memdef-proto-background-color);
+  border: 1px solid var(--owl-line);
+  border-radius: 0;
+  box-shadow: none;
+  padding: 10px 14px;
+  font-family: var(--font-family-monospace);
+  font-size: 13.5px;
+}
+
+.memdoc {
+  border: 1px solid var(--owl-line);
+  border-top: none;
+  border-radius: 0 0 var(--owl-radius) var(--owl-radius);
+  box-shadow: none;
+  padding: 14px 16px 8px;
+}
+
+.paramname { color: var(--memdef-param-name-color); font-weight: 600; }
+
+dl.params dt, dl.retval dt, dl.exception dt, dl.tparams dt { color: var(--owl-navy); }
+
+/* callout blocks: @note, @warning, @attention, @see, ... */
+dl.note, dl.warning, dl.attention, dl.pre, dl.post,
+dl.remark, dl.bug, dl.todo, dl.deprecated, dl.invariant {
+  border-radius: var(--owl-radius-sm);
+  padding: 10px 14px;
+  margin: 16px 0;
+  border-left-width: 4px;
+  background: var(--owl-surface);
+}
+
+dl.note, dl.remark    { border-left-color: #4c8fc4; }
+dl.warning,
+dl.attention          { border-left-color: #d08a1a; }
+dl.bug, dl.deprecated { border-left-color: #c4564c; }
+dl.todo               { border-left-color: #7a5cc4; }
+dl.pre, dl.post, dl.invariant { border-left-color: var(--owl-navy-soft); }
+
+blockquote {
+  border-radius: var(--owl-radius-sm);
+  border-left-width: 4px;
+  padding: 10px 14px;
+  margin-left: 0;
+}
+
+/* ---------------------------------------------------------------- tables */
+
+table.doxtable,
+table.markdownTable {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--owl-line);
+  border-radius: var(--owl-radius);
+  overflow: hidden;
+  box-shadow: var(--owl-shadow);
+  margin: 20px 0;
+  font-size: 14px;
+  width: 100%;
+}
+
+table.doxtable th,
+table.markdownTable th,
+table.markdownTable tr.markdownTableHead th {
+  background: var(--table-header-background-color);
+  color: var(--table-header-foreground-color);
+  border: none;
+  font-weight: 600;
+  text-align: left;
+  padding: 10px 14px;
+}
+
+table.doxtable td,
+table.markdownTable td {
+  border: none;
+  border-top: 1px solid var(--owl-line);
+  padding: 9px 14px;
+  vertical-align: top;
+}
+
+table.markdownTable tr.markdownTableRowOdd td { background: var(--owl-surface); }
+table.markdownTable tr.markdownTableRowEven td { background: transparent; }
+table.doxtable tr:nth-child(even) td { background: var(--owl-surface); }
+
+.textblock { overflow-wrap: break-word; }
+
+/* ------------------------------------------------------------------ code */
+
+div.fragment,
+pre.fragment {
+  border: 1px solid var(--fragment-border-color);
+  border-radius: var(--owl-radius);
+  padding: 12px 14px;
+  overflow-x: auto;
+  box-shadow: none;
+}
+
+div.line {
+  font-family: var(--font-family-monospace);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+code, tt, span.mlabel, .computeroutput { font-family: var(--font-family-monospace); }
+
+/* inline `code` from markdown */
+.textblock code,
+.memdoc code,
+p code,
+li code,
+td code {
+  background: var(--owl-surface-alt);
+  border: 1px solid var(--owl-line);
+  border-radius: 5px;
+  padding: .08em .38em;
+  font-size: 87%;
+}
+
+span.mlabel {
+  border-radius: 999px;
+  border: none;
+  padding: 2px 9px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------- search */
+
+#MSearchBox {
+  border-radius: 999px;
+  border: 1px solid var(--search-box-border-color);
+  background: var(--search-background-color);
+  box-shadow: none;
+}
+
+#MSearchField { font-family: var(--font-family-normal); font-size: 13px; }
+
+#MSearchResultsWindow {
+  border-radius: var(--owl-radius);
+  box-shadow: var(--owl-shadow);
+}
+
+/* ----------------------------------------------------------- directories */
+
+table.directory .arrow { color: var(--owl-navy-soft); }
+table.directory td.entry { padding: 5px 8px; }
+.icona .icon { border-radius: var(--owl-radius-sm); font-weight: 600; }
+
+/* ---------------------------------------------------------------- footer */
+
+address.footer {
+  font-size: 11.5px;
+  color: var(--footer-foreground-color);
+  padding: 18px 0 26px;
+  border-top: 1px solid var(--owl-line);
+  max-width: 1000px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ small view */
+
+@media (max-width: 720px) {
+  div.contents, div.header { padding-left: 16px; padding-right: 16px; }
+  div.title { font-size: 24px; }
+  #projectname { font-size: 21px; }
+}
