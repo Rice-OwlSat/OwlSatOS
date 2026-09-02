@@ -13,7 +13,7 @@
  * Prints a prompt, reads a line from stdin, strips the trailing newline,
  * and echoes the input back. Loops indefinitely; never returns.
  *
- * @param params Unused (FreeRTOS task parameter, pass nullptr).
+ * Not created by main() on this branch — see console.h.
  */
 void consoleTask(void *params) {
     printf("OwlSatOS Console Ready\n");
