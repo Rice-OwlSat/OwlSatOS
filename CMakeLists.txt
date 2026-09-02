@@ -74,8 +74,17 @@ pico_set_program_version(OwlSatOS "0.1")
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
         hardware_pwm
+        hardware_flash
+        pico_flash
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
+)
+
+# Nonvolatile storage runs flash erase/program through flash_safe_execute(). This port is
+# single-core (RP2350_ARM_NTZ, core 1 never started), so the other core needs no lockout —
+# see docs/internal/storage_api.md §6.1. Remove this the day core 1 is launched.
+target_compile_definitions(OwlSatOS PRIVATE
+        PICO_FLASH_ASSUME_CORE1_SAFE=1
 )
 
 pico_enable_stdio_usb(OwlSatOS 1)

@@ -1,10 +1,12 @@
 # Tutorial: nonvolatile storage {#tutorial_nonvolatile_storage}
 
 **Branch:** `nonvolatile-data-storage`.
-**Status: design only. There is no storage code on this branch yet.** The API below is the one
-specified in `docs/internal/storage_api.md`; this page is written against it so that the
-implementation, when it lands, has a usage contract to be checked against. Where the tutorial
-says "will", that is a statement about the design, not the code.
+**Status: layer 1 is implemented, layer 2 is design.** The region layer
+(`include/OwlSat/storage.h`, `src/storage.c`) partitions the upper half of the QSPI device, checks
+at boot that the program does not reach into it, and exposes bounds-checked read, erase and
+program. The key/value store and latched flags in §3 and §4 are written against the API in
+`docs/internal/storage_api.md` and do not exist yet; where the tutorial says "will", that is a
+statement about the design, not the code.
 
 **Reader:** someone who has to save a config value, latch a one-shot flag, implement the layer,
 or work out why a commit reset the satellite.
@@ -13,8 +15,8 @@ or work out why a commit reset the satellite.
 
 ## 1. What this is, and is not
 
-A key/value store and a set of latched flags, held in the top 1024 KB of the QSPI device that
-also holds the program. **There is no filesystem.** The earlier FAT12 + USB mass-storage plan is
+A key/value store and a set of latched flags, held in the upper half of the QSPI device that
+also holds the program (1024 KB on the 2 MiB flight part, 2048 KB on the 4 MB dev board). **There is no filesystem.** The earlier FAT12 + USB mass-storage plan is
 superseded; see `storage_api.md` §10 for why.
 
 ```
@@ -56,8 +58,8 @@ wear discussion are deleted and everything else stays (`storage_api.md` §9).
 Keys are a `uint16_t` enum, not strings. Values are fixed-size blobs the caller owns the layout of.
 
 ```c
-#include "storage.h"   // region layer, storage_init()
-#include "nvm.h"       // nvm_get / nvm_set / nvm_commit
+#include <OwlSat/storage.h>   // region layer, storage_init() — exists
+#include <OwlSat/nvm.h>       // nvm_get / nvm_set / nvm_commit — design
 
 // At boot, before the scheduler, after stdio:
 storage_err_t rc = storage_init();
@@ -95,7 +97,7 @@ Do not "optimise" the header ordering.
 For facts that must never revert: "the burn wires have fired", "first boot is done".
 
 ```c
-#include "latch.h"
+#include <OwlSat/latch.h>     // design
 
 if (!latch_is_set(LATCH_ANTENNA_DEPLOYED)) {
   FireBurnWires();
@@ -150,9 +152,11 @@ After any write, `flash_flush_cache()` before reading the range through `XIP_BAS
 
 ## 6. The region layer, for implementers
 
-Clients of layer 2 never see this. Whoever writes layer 2 does.
+Clients of layer 2 never see this. Whoever writes layer 2 does. This is the part that exists.
 
 ```c
+#include <OwlSat/storage.h>
+
 storage_region_t r;
 storage_region_open(REGION_CONFIG_B, &r);          // resolves base/size; never a raw pointer
 
@@ -168,11 +172,18 @@ storage_region_read (&r, 0, buf, 37);              // any offset, any length
   surrounding sector destroys whatever shared it. Read-modify-write is explicit, one layer up.
 - Every call bounds-checks `off + len` against the region, with the addition checked for
   overflow first.
-- Route through `flash_safe_execute()` with `PICO_FLASH_ASSUME_CORE1_SAFE=1` even though core 1
-  is never started, so the day someone starts it this code does not become the bug. Add
-  `pico_flash` and `hardware_flash` to `target_link_libraries`.
+- Erase runs one sector per critical section and program one page per critical section, each
+  through `flash_safe_execute()` with `PICO_FLASH_ASSUME_CORE1_SAFE=1` (already in
+  `CMakeLists.txt`). Both verify through the uncached XIP alias and flush the cache afterwards,
+  so a read through this API after a write sees the device, not the cache.
+- Writes are refused with `STORAGE_ERR_UNSAFE` until `storage_init()` has passed the overlap
+  check; reads work regardless. `storage_is_armed()` reports which state you are in and
+  `storage_print_layout()` prints the whole map, which `Hal::StorageInit()` does at boot.
+- The lock has a finite timeout (100 ms) and reports `STORAGE_ERR_BUSY`. Before the scheduler
+  starts it is taken with zero wait, so `storage_init()` and any pre-scheduler provisioning are
+  safe.
 
-Region map, offsets from `STORAGE_BASE_OFFSET = PICO_FLASH_SIZE_BYTES - 1024 KB`:
+Region map, offsets from `STORAGE_BASE_OFFSET = PICO_FLASH_SIZE_BYTES / 2`:
 
 | Region | Offset | Size | Holds |
 |---|---|---|---|
@@ -180,11 +191,13 @@ Region map, offsets from `STORAGE_BASE_OFFSET = PICO_FLASH_SIZE_BYTES - 1024 KB`
 | `REGION_CONFIG_B` | `0x04000` | 16 KB | K/V bank B |
 | `REGION_LATCH` | `0x08000` | 4 KB | 16 write-once flags |
 | `REGION_SCRATCH` | `0x09000` | 4 KB | firmware-update metadata, never the image |
-| reserved | `0x0A000` | 984 KB | unallocated; update the table before using |
+| reserved | `0x0A000` | rest of the half | unallocated; update the table before using |
 
-The base is derived, not written down, because the dev board is 4 MB and the flight part is
-2 MiB. `static_assert` that the device is larger than the reservation, or the subtraction wraps
-and lands storage on the program.
+The base and the size are derived, not written down, because the dev board is 4 MB and the
+flight part is 2 MiB. The `_Static_assert`s at the top of `storage.c` check alignment,
+non-overlap, that the map fits the reservation, and that the reservation is anchored to the end
+of the device; add a region by adding its macros to `storage.h`, a row to `k_regions[]`, and an
+overlap assertion against its neighbour.
 
 ---
 
@@ -206,14 +219,14 @@ image at about 512 KB; the current build is around 25 KB.
 
 In the order the dependencies run:
 
-1. `storage.h` / `storage.c`: region table, the compile-time checks from `storage_api.md` §4.2,
-   `storage_init()` with the runtime `STORAGE_BASE_OFFSET >= __flash_binary_end` check, the four
-   region calls.
+1. ~~`storage.h` / `storage.c`: region table, the compile-time checks from `storage_api.md`
+   §4.2, `storage_init()` with the runtime `STORAGE_BASE_OFFSET >= __flash_binary_end` check, the
+   four region calls.~~ **Done.** `Hal::StorageInit()` calls it and prints the layout.
 2. `latch.h` / `latch.c`: page-per-flag, RAM cache at init, CRC-fail-reads-as-set.
 3. `nvm.h` / `nvm.c`: bank header, RAM mirror, `nvm_get`/`nvm_set`/`nvm_commit`, header-last
    commit ordering.
-4. Wire `Hal::StorageInit()` / `StorageAvailable()` on master to `storage_init()`.
-   `Hal::StorageAppend()` stays false: bulk records are not this store's job (§1).
+4. Flip `Hal::StorageAvailable()` once layer 2 can take a write. `Hal::StorageAppend()` stays
+   false: bulk records are not this store's job (§1).
 5. Measure the fitted part's worst-case sector erase and the external watchdog timeout, and write
    the margin into `storage_api.md` §6.
 

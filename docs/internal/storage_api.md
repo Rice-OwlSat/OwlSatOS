@@ -1,6 +1,8 @@
 # OwlSat Storage API — Internal Design
 
-**Status:** Design. No code on this branch yet (`nonvolatile-data-storage`).
+**Status:** Layer 1 (the region layer, `include/OwlSat/storage.h` / `src/storage.c`) is
+implemented on `nonvolatile-data-storage` and builds. Layer 2 (K/V store, latched flags) is
+still design.
 **Scope:** The non-volatile storage API the rest of OwlSatOS uses to keep small amounts of state
 across power cycles — configuration and latched one-shot flags — held in the QSPI memory that
 also holds the program, without ever writing over the program.
@@ -92,23 +94,26 @@ storage is pinned to the **top**, growing nowhere.
    +--------------------------------------------------+ PICO_FLASH_SIZE_BYTES
 ```
 
-The reservation is a fixed **1024 KB**. The offset it begins at is not fixed — it follows the
-device, because the dev board and the flight part are not the same size:
+The reservation is the **upper half of the device**. Neither the size nor the offset is written
+down as a literal — both follow `PICO_FLASH_SIZE_BYTES`, because the dev board and the flight part
+are not the same size:
 
 ```c
-#define STORAGE_RESERVE_BYTES  (1024u * 1024u)
+#define STORAGE_RESERVE_BYTES  (PICO_FLASH_SIZE_BYTES / 2u)
 #define STORAGE_BASE_OFFSET    (PICO_FLASH_SIZE_BYTES - STORAGE_RESERVE_BYTES)
 ```
 
-| Device | `PICO_FLASH_SIZE_BYTES` | `STORAGE_BASE_OFFSET` | Program + staging slack |
-|---|---|---|---|
-| Pico 2 dev board | 4 MB | `0x300000` | 3072 KB |
-| Flight part (2 MiB) | 2 MiB | `0x100000` | 1024 KB |
+| Device | `PICO_FLASH_SIZE_BYTES` | `STORAGE_BASE_OFFSET` | Reservation | Program + staging slack |
+|---|---|---|---|---|
+| Pico 2 dev board | 4 MB | `0x200000` | 2048 KB | 2048 KB |
+| Flight part (2 MiB) | 2 MiB | `0x100000` | 1024 KB | 1024 KB |
 
-Deriving the base rather than writing it down is the point: a hard-coded `0x3C0000` is correct on
-exactly one device and silently wrong on every other, and "silently wrong" here means storage
-overlapping the program. The one number that must be written down is the reservation size, and it
-is written down once.
+On the flight part this is the 1024 KB reservation earlier revisions of this document specified;
+on the dev board it is twice that, which costs nothing because the region map (§3) allocates
+40 KB regardless. Deriving both numbers rather than writing them down is the point: a hard-coded
+`0x3C0000` is correct on exactly one device and silently wrong on every other, and "silently
+wrong" here means storage overlapping the program. Half-the-device also keeps the program/data
+split identical in proportion on every board, so a firmware that fits the bench fits flight.
 
 Anchoring to the *top* rather than to `__flash_binary_end` is the whole safety argument. The
 binary end moves every single build. If storage started there, every firmware update would
@@ -197,10 +202,10 @@ resource; erase cycles and the ability to change our minds later are.
 | `REGION_SCRATCH` | `0x09000` | 4 KB | Firmware-update staging metadata |
 | — reserved — | `0x0A000` | 984 KB | Unallocated. Do not use without updating this table. |
 
-Note what growing the reservation to 1024 KB did and did not do. It did **not** give the K/V store
+Note what sizing the reservation at half the device did and did not do. It did **not** give the K/V store
 more room: one bank is live at a time, so config capacity is still one 16 KB bank minus a 32-byte
 header — about **16 KB of payload** — and the latch region still holds exactly **16 flags**, one
-per 256 B page. All 768 KB of the increase landed in the unallocated reserve.
+per 256 B page. Everything beyond 40 KB is unallocated reserve — 984 KB on the flight part.
 
 That is deliberate. The regions are sized by what they hold, not by what is available, and the
 reserve is the part that is *supposed* to be big: it is where the bulk-telemetry sink that §10
@@ -216,6 +221,10 @@ This is a static assertion, not a convention ([§4.2](#42-the-checks)).
 ## 4. Region layer
 
 ### 4.1 Interface
+
+Implemented in `include/OwlSat/storage.h` and `src/storage.c`; the sketch below is the shape.
+The real header adds `storage_is_armed()`, `storage_layout()`, `storage_print_layout()`,
+`storage_err_str()` and a `STORAGE_ERR_PARAM` code for null pointers and bad ids.
 
 ```c
 /**
@@ -278,18 +287,18 @@ Enforced at **compile time**, in `static_assert`:
 - No two regions overlap.
 - The last region ends at or before `PICO_FLASH_SIZE_BYTES`.
 - `STORAGE_BASE_OFFSET` is sector-aligned.
-- **`PICO_FLASH_SIZE_BYTES > STORAGE_RESERVE_BYTES`**, with margin. Now that the base offset is
-  derived by subtraction ([§2.1](#21-one-qspi-device-on-cs0-shared-with-the-program)), a
-  device smaller than the reservation does not produce an error — it produces an *unsigned
+- **`PICO_FLASH_SIZE_BYTES > STORAGE_RESERVE_BYTES`**, and the base plus the reservation
+  lands exactly on the end of the device. With the reservation itself derived as half the device
+  this cannot fail today, but the assertion stays: if someone later fixes the reservation at a
+  literal size, a device smaller than it does not produce an error — it produces an *unsigned
   wraparound*, and `STORAGE_BASE_OFFSET` lands somewhere near the top of the address space or, at
   exactly equal sizes, at `0`, directly on top of the program. Neither is caught by any of the
-  checks above, because both are internally consistent. This assertion is what makes the
-  subtraction safe to write.
+  checks above, because both are internally consistent.
 
 Enforced at **`storage_init()`**, once, at boot, before the scheduler starts:
 
-- `STORAGE_BASE_OFFSET >= (uintptr_t)&__flash_binary_end - XIP_BASE`, plus a slack margin.
-  This is the "don't overwrite the program" check, and it is the only one that has to be a runtime
+- `STORAGE_BASE_OFFSET >= (uintptr_t)&__flash_binary_end - XIP_BASE`, plus
+  `STORAGE_PROGRAM_MARGIN_BYTES` (one sector). This is the "don't overwrite the program" check, and it is the only one that has to be a runtime
   check, because the binary size is not known to the preprocessor. Declare the symbol as
   `extern char __flash_binary_end;` and take its address.
 - On failure: refuse to arm any write path, latch a fault, and shout on the console. Do **not**
@@ -486,8 +495,8 @@ its keep: staging cannot reach the config, and config cannot reach the staged im
 
 ### 8.1 The image-size budget this imposes
 
-On the 2 MiB flight part, a 1024 KB reservation splits the device exactly in half, and the running
-program and the staged image must both fit in the lower half:
+The reservation is half the device, so the running program and the staged image must both fit
+in the lower half. On the 2 MiB flight part:
 
 ```
   program image  +  staged image  <=  STORAGE_BASE_OFFSET  =  1024 KB
@@ -495,7 +504,8 @@ program and the staged image must both fit in the lower half:
 
 So the practical ceiling on firmware size is **~512 KB**, and it is a ceiling on the *running*
 image, not on the update — the two are the same size in a like-for-like update. There is a lot of
-room against it today: the current release build is 25,480 bytes, about 5 % of budget.
+room against it today: the release build with the region layer is about 56 KB of text, roughly
+11 % of budget.
 
 This is the number to watch, and it is the reason the reservation is worth revisiting rather than
 treating as settled. Storage is not consuming 1024 KB — it is allocating 40 KB and holding 984 KB
@@ -601,8 +611,8 @@ itself — things someone has to go and decide or measure — see [§12](#12-ans
   carries a correction note rather than a silent edit, because that file's job is to say what the
   image says. Until the image is fixed, anyone reading it alone will size firmware against a
   device eight times too small. Not a design question — a task.
-- Is 1024 KB the right reservation? It is biased toward "we will want room later", and §3 is
-  candid that 984 KB of it is unallocated. The two things most likely to move it are the
+- Is half the device the right reservation? It is biased toward "we will want room later", and
+  §3 is candid that all but 40 KB of it is unallocated. The two things most likely to move it are the
   firmware-update staging budget (§8.1) and the bulk-telemetry sink that §10 leaves unowned.
 - Should `REGION_SCRATCH` be readable by ground for post-mortem after a failed update?
 - Does the RTC (`hardware_block_diagram.md` §2) need a region for drift calibration, or does that
