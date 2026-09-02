@@ -135,7 +135,7 @@ master; what is missing is the durable half. The IMU, magnetometer and power mon
 with the EUV ADC, so whichever task reads them has to respect the same bus arbitration the EUV
 driver defers to.
 
-### TASK: Deal with requests for data
+### TASK: Deal with requests for data `(TODO: I NEED TO REWRITE THIS SECTION BECAUSE A CONSOLE TASK IN FLIGHT IS A STUPID IDEA)`
 - Extend `consoleTask` with a real command parser instead of echo-only, and wire it back into
   `main()` once parsing is implemented
 - Handle at minimum: request for a range of records, request for current sensor readings, and a
