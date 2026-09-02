@@ -1,5 +1,5 @@
 # The OwlSat Kernel
----
+
 OwlSat flight software, written in C/C++ for the **RP2350** (Raspberry Pi Pico 2).
 
 ## Building
@@ -13,6 +13,9 @@ OwlSat flight software, written in C/C++ for the **RP2350** (Raspberry Pi Pico 2
   `doxygen ./owlsatos.Doxyfile` and it generates HTML and LaTeX under `docs/` (both gitignored).
 - **Tutorials** live in `docs/tutorials/` and appear under *Related Pages* in the Doxygen output.
   Each branch carries the tutorial for the interface it owns; see the table below.
+- **Theme** lives in `docs/theme/`: `owlsat.css` (loaded through `HTML_EXTRA_STYLESHEET`, light and
+  dark), `logo.png` in the banner and `favicon.png` in the tab. It only overrides doxygen's own CSS
+  variables, so a doxygen upgrade will not break it.
 - **Design documents** live in `docs/internal/`. `hardware_block_diagram.md` is the plain-text
   transcription of the block diagram and is on `master`; the others are on the branch they belong to.
 
