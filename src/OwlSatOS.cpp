@@ -1,4 +1,32 @@
 /**
+                         ┌────────┐                         
+                 ┌───────┘        └───────┐                 
+          ┌┬─────┘                        └─────┬┐          
+          │└───┐   /\                  /\   ┌───┘│          
+          │    └──/  \                /  \──┘    │          
+          │      /    ────┐      ┌────    \      │          
+          │     /         └──────┘         \     │          
+          │     └───┐                  ┌───┘     │          
+          │         └┬────┐      ┌────┬┘         │          
+          │          │    └┬─┬┬─┬┘    │          │          
+          │          └─────┘ ││ └─────┘          │          
+          │                  ││                  │          
+          │                  ││                  │          
+          │                  ││                  │          
+          │                  ││                  │          
+          └──┐               ││               ┌──┘          
+             └─────┐         ││         ┌─────┘             
+                   └─────┐   ││   ┌─────┘                   
+      ┌──────┐           └───┴┴───┘           ┌──────┐      
+      │ ┌───┐└──────────┐          ┌──────────┘──┬───│      
+      │ │   │   │     │ └──────────┘  ┌─────┐    │   │      
+      │ │   │   │     │  │     ┌───   │     │    │   │      
+      │ │   │   │     │  │     │      ├─────┤    │   │      
+      │ └───┘   │  │  │  │     └──┐   │     │    │   │      
+      └──────┐  └──┴──┘  │        │   │     │ ┌──────┘      
+             └──────────┐└───  ───┘┌──────────┘             
+                        └──────────┘                        
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
  * @file OwlSatOS.cpp
  * @brief Entry point and task creation for OwlSatOS.
  *
@@ -27,6 +55,7 @@
 
 #include <OwlSat/config.h>
 #include <OwlSat/hal.h>
+#include <OwlSat/pin_assignment.h>
 #include <OwlSat/storage_table.h>
 #include <OwlSat/tasks.h>
 #include <OwlSat/watchdog.h>
@@ -34,7 +63,7 @@
 #define GPIO_ON  1 ///< Logic high — drive GPIO pin high.
 #define GPIO_OFF 0 ///< Logic low  — drive GPIO pin low.
 
-constexpr uint LED_PIN = PICO_DEFAULT_LED_PIN;
+constexpr uint LED_PIN = DEBUG_LED;
 
 /**
  * @brief Onboard-LED heartbeat.
