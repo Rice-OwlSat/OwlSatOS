@@ -83,6 +83,25 @@ else. With SENS_PWR low, the ADC does not answer on the bus at all.
 - **2 Mb code MRAM + 2 Mb data MRAM** — the diagram notes a preference for splitting code and
   data MRAM so that data cannot overwrite code. Sizing note: 8 Mbit (1 MB) for code and
   2 Mbit (256 KB) for data is considered good.
+
+> **Correction — the drawing is wrong here, on two counts.**
+>
+> 1. **Size.** The fitted part is **2 MiB** (mega*byte*), not 2 Mb (mega*bit*) — the drawing
+>    understates it by a factor of eight.
+> 2. **Count.** The current hardware plan is **one MRAM part carrying both program and data,
+>    wired to CS0** — not the two-part code/data split drawn here. The separation that the
+>    drawing's note argues for ("so that data cannot overwrite code") therefore does not exist in
+>    hardware, and has to be enforced in firmware instead.
+>
+> Recorded as a note rather than a transcription edit because the rule at the top of this file
+> still holds — the text above says what the image says, and the image is what needs fixing.
+> **Action: redraw `OwlSat Hardware block diagram.png` as a single 2 MiB MRAM on CS0, then delete
+> this note.**
+>
+> **Open on hardware:** the part now sits on the boot path, so it must be *bootable*, not just
+> readable and writable. Confirming that the RP2350 boots from it — stage 2, read command set, XIP
+> setup — is the item everything else waits on. Firmware's standing assumption until told
+> otherwise is that the part behaves identically to the 2 MiB NOR flash on a Pico.
 - 4x neopixel for debug, 1 debug LED, boot / reset / user buttons.
 
 ### Watchdog
@@ -236,7 +255,9 @@ Transcribed as written, because firmware assumptions should not quietly outrun t
 - Evaluate inrush limiters — look at NyanSat's implementation; possibly build a combined
   inrush limiter and current trip.
 - Verify that short / SEL detection works on everything.
-- Decide MRAM size and configuration.
+- Decide MRAM size and configuration. *(Partly settled: the parts are 2 MiB, not the 2 Mb the
+  drawing shows — see the correction in §2. The code/data split across two chip selects is still
+  open.)*
 - Mark I2C addresses and address-select pin selections on the diagram.
 - Put boot/reset in the USB-C connection?
 - Look at how to completely disconnect the USB-C charging system once in flight.
