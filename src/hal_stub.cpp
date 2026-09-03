@@ -21,8 +21,10 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
+#include <pico/stdlib.h>
 
 #include <OwlSat/hal.h>
+#include <OwlSat/pin_assignment.h>
 #include <OwlSat/storage.h>
 
 namespace OwlSat::Hal {
@@ -94,7 +96,8 @@ namespace OwlSat::Hal {
   // -----------------------------------------------------------------------
 
   bool RadioInit() {
-    // MERGE: radio -> assert RADIO_PWR, bring up SPI0 and the CAN bridge to the LTM-1.
+    // MERGE: radio -> gpio_put(RADIO_PWR, 1), bring up OWLSAT_SPI0 and the CAN controller
+    //        behind CAN_CS, then the LTM-1 link layer. Pins are in pin_assignment.h.
     printf("[hal] RadioInit: no radio driver in this build (branch radio)\n");
     return false;
   }
@@ -124,18 +127,30 @@ namespace OwlSat::Hal {
   // -----------------------------------------------------------------------
 
   void WatchdogInit() {
-    // MERGE: pin_assignment.h has no WDT_WDI macro yet — the harness drawing has not fixed the
-    // pin. Once it does: gpio_init(WDT_WDI_PIN); gpio_set_dir(..., GPIO_OUT); gpio_put(..., 0);
-    printf("[hal] WatchdogInit: WDT_WDI pin not assigned; pulses go to the console only\n");
+    // Not a stub. WDT_WDI is a line the flight computer owns directly — there is no external
+    // part to drive it through — so it needs no branch to land. The pin number and the pulse
+    // width are still placeholders from pin_assignment.h, which is why this says so out loud.
+#if OWLSAT_PIN_IS_ASSIGNED(WDT_WDI)
+    gpio_init(WDT_WDI);
+    gpio_set_dir(WDT_WDI, GPIO_OUT);
+    gpio_put(WDT_WDI, 0);
+    printf("[hal] WatchdogInit: WDT_WDI on GPIO %d (placeholder pin, %d us pulse)\n",
+           WDT_WDI, WDT_WDI_PULSE_US);
+#else
+    printf("[hal] WatchdogInit: WDT_WDI unassigned; pulses go to the console only\n");
+#endif
   }
 
   void WatchdogPulse() {
-    // MERGE: drive a pulse wide enough for the external part to latch — the datasheet minimum
-    // is a board-level number and is not yet fixed:
-    //   gpio_put(WDT_WDI_PIN, 1); busy_wait_us(WDT_WDI_PULSE_US); gpio_put(WDT_WDI_PIN, 0);
-    //
     // Silent by design. This runs several times a second, and a printf here would drown the
     // console and put newlib's formatting on the one path that has to stay cheap and reliable.
+#if OWLSAT_PIN_IS_ASSIGNED(WDT_WDI)
+    gpio_put(WDT_WDI, 1);
+    busy_wait_us(WDT_WDI_PULSE_US);
+    gpio_put(WDT_WDI, 0);
+#endif
+    // TBC: WDT_WDI_PULSE_US is a placeholder until the external part is selected. Widen it to
+    // that part's datasheet minimum, not to whatever happens to work on the bench.
   }
 
 } // namespace OwlSat::Hal
