@@ -158,13 +158,19 @@ namespace OwlSat::Ltm1 {
 namespace OwlSat::Hal {
 
   bool RadioInit() {
-    // MERGE: assert RADIO_PWR before touching the controller — the transceiver is inside the
+    // RADIO_PWR must be asserted before the controller is touched — the transceiver is inside the
     // switched domain, and a controller brought up against a dead transceiver reports a healthy
-    // bus with nothing on it. pin_assignment.h has no RADIO_PWR macro yet.
+    // bus with nothing on it. pin_assignment.h now defines the pin, so the macro is no longer
+    // what is missing.
     //
-    // The ICD also makes this a safety interlock, not just a power step: the host must withhold
-    // LTM power until the antennas are deployed and the launch provider's post-release timer has
-    // expired. Whatever owns deployment has to gate this call. See the design doc.
+    // It is deliberately not asserted here. The ICD makes RADIO_PWR a safety interlock and not
+    // merely a power step: the host must withhold LTM power until the antennas are deployed and
+    // the launch provider's post-release timer has expired. Driving it unconditionally at init
+    // would defeat exactly the interlock the line exists to enforce.
+    //
+    // MERGE: whatever owns deployment gates this — check the antenna-deployed latch (see the
+    // storage branch) and the post-release timer, then gpio_put(RADIO_PWR, 1) and let the domain
+    // settle before Can::Init(). See §8 of docs/internal/ltm1_link_design.md.
     const bool up = Can::Init();
 
     Ltm1::g_initialised = true;

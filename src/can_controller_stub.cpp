@@ -20,9 +20,14 @@
 namespace OwlSat::Can {
 
   bool Init() {
-    // MERGE: choose the controller, then bring up SPI0 at the part's maximum sane clock, assert
-    // CAN_CS, reset, and program bit timing for OWLSAT_LTM_CAN_BITRATE (125 kbit/s) with the
-    // sample point around 75%. Leave the part in normal mode, not loopback.
+    // MERGE: choose the controller, then bring up OWLSAT_SPI0 (OWLSAT_SPI0_SCK / _MOSI / _MISO)
+    // at the part's maximum sane clock, assert CAN_CS, reset, and program bit timing for
+    // OWLSAT_LTM_CAN_BITRATE (125 kbit/s) with the sample point around 75%. Leave the part in
+    // normal mode, not loopback. All four pins are in pin_assignment.h; CAN_CS is driven as
+    // plain GPIO because the SPI block's hardware CS holds for a transfer, not a transaction.
+    //
+    // CAN_INT is assigned but provisional — the part is not chosen, and a polled driver need not
+    // use it. Prefer polling until the part is known.
     printf("[can] Init: no CAN controller in this build (part not selected)\n");
     return false;
   }
