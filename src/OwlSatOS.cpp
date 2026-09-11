@@ -55,6 +55,7 @@
 
 #include <OwlSat/config.h>
 #include <OwlSat/hal.h>
+#include <OwlSat/imu.h>
 #include <OwlSat/pin_assignment.h>
 #include <OwlSat/storage_table.h>
 #include <OwlSat/tasks.h>
@@ -83,6 +84,53 @@ void blink(void *param) {
     vTaskDelay(pdMS_TO_TICKS(OWLSAT_BLINK_HALF_PERIOD_MS));
   }
 }
+
+// ---------------------------------------------------------------------------
+// TEMP: IMU smoke test — no IMU hardware is wired up yet; this exists only to show that
+// OwlSat::Imu fails honestly (Init() false, reads false) with nothing on the bus, rather than
+// fabricating a reading. Delete this task, its Spawn() call below and the imu.h include once
+// real hardware is on the bench or an attitude task replaces it.
+//
+// Not a watchdog client and not registered in config.h, for the same reason blink() is not: it
+// proves nothing about mission progress, only that this one-shot check ran.
+// ---------------------------------------------------------------------------
+
+namespace {
+  void ImuSmokeTestTask(void *param) {
+    (void) param;
+
+    printf("[imu_test] calling Imu::Init()...\n");
+    const bool up = OwlSat::Imu::Init();
+    printf("[imu_test] Init() -> %s\n",
+           up ? "true (a sensor answered!)" : "false (no sensor answered — expected, none wired up)");
+
+    for (int i = 0; i < 20; ++i) {
+      OwlSat::Imu::AccelSample accel;
+      OwlSat::Imu::MagSample   mag;
+      const bool got_accel = OwlSat::Imu::ReadAccel(&accel);
+      const bool got_mag   = OwlSat::Imu::ReadMag(&mag);
+
+      if (got_accel) {
+        printf("[imu_test] accel: x=%.3f y=%.3f z=%.3f g\n",
+               (double) accel.x_g, (double) accel.y_g, (double) accel.z_g);
+      } else {
+        printf("[imu_test] accel: no data\n");
+      }
+
+      if (got_mag) {
+        printf("[imu_test] mag: x=%.3f y=%.3f z=%.3f gauss\n",
+               (double) mag.x_gauss, (double) mag.y_gauss, (double) mag.z_gauss);
+      } else {
+        printf("[imu_test] mag: no data\n");
+      }
+
+      vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    printf("[imu_test] done\n");
+    vTaskDelete(nullptr);
+  }
+} // namespace
 
 namespace {
 
@@ -156,6 +204,10 @@ int main() {
   ok = Spawn(OwlSat::TransmitTask, "tx", OWLSAT_STACK_TRANSMIT, OWLSAT_PRIO_TRANSMIT) && ok;
   ok = Spawn(OwlSat::Watchdog::WatchdogTask, "wdt", OWLSAT_STACK_WATCHDOG, OWLSAT_PRIO_WATCHDOG)
        && ok;
+
+  // TEMP: see the banner above ImuSmokeTestTask's definition. Stack/priority are arbitrary
+  // literals, not config.h constants, because this task is not meant to outlive the test.
+  ok = Spawn(ImuSmokeTestTask, "imu_test", 512, OWLSAT_PRIO_SENSOR) && ok;
 
   if (!ok) {
     HaltForWatchdog("one or more flight tasks could not be created");
