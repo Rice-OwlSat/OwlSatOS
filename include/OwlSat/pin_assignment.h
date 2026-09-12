@@ -24,6 +24,7 @@
 **/
 #pragma once
 
+// todo make these constexpr in a namespace
 
 // ---------------------------------------------------------------------------
 // Unassigned signals
