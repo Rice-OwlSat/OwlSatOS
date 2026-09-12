@@ -18,6 +18,7 @@
 **/
 #pragma once
 
+// todo make these constexpr in a namespace
 
 // ---------------------------------------------------------------------------
 // Array geometry
