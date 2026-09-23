@@ -70,7 +70,7 @@ namespace OwlSat {
     p = PutU16(p, record.uv.flags);
     p = PutU8(p, record.uv.face_mask);
 
-    for (size_t face = 0; face < OWLSAT_UV_FACE_COUNT; ++face) {
+    for (size_t face = 0; face < Config::UV_FACE_COUNT; ++face) {
       p = PutU16(p, record.uv.code[face]);
       p = PutU8(p, record.uv.gain[face]);
       p = PutU16(p, record.uv.face_flags[face]);

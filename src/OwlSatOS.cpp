@@ -63,7 +63,7 @@
 #define GPIO_ON  1 ///< Logic high — drive GPIO pin high.
 #define GPIO_OFF 0 ///< Logic low  — drive GPIO pin low.
 
-constexpr uint LED_PIN = DEBUG_LED;
+constexpr uint LED_PIN = OwlSat::Pins::DEBUG_LED;
 
 /**
  * @brief Onboard-LED heartbeat.
@@ -78,9 +78,9 @@ void blink(void *param) {
   (void) param;
   for (;;) {
     gpio_put(LED_PIN, GPIO_ON);
-    vTaskDelay(pdMS_TO_TICKS(OWLSAT_BLINK_HALF_PERIOD_MS));
+    vTaskDelay(pdMS_TO_TICKS(OwlSat::Config::BLINK_HALF_PERIOD_MS));
     gpio_put(LED_PIN, GPIO_OFF);
-    vTaskDelay(pdMS_TO_TICKS(OWLSAT_BLINK_HALF_PERIOD_MS));
+    vTaskDelay(pdMS_TO_TICKS(OwlSat::Config::BLINK_HALF_PERIOD_MS));
   }
 }
 
@@ -150,11 +150,11 @@ int main() {
   (void) OwlSat::Hal::StorageInit();
 
   bool ok = true;
-  ok = Spawn(blink, "blink", OWLSAT_STACK_BLINK, OWLSAT_PRIO_BLINK) && ok;
-  ok = Spawn(OwlSat::SensorTask, "sensor", OWLSAT_STACK_SENSOR, OWLSAT_PRIO_SENSOR) && ok;
-  ok = Spawn(OwlSat::LinkTask, "link", OWLSAT_STACK_LINK, OWLSAT_PRIO_LINK) && ok;
-  ok = Spawn(OwlSat::TransmitTask, "tx", OWLSAT_STACK_TRANSMIT, OWLSAT_PRIO_TRANSMIT) && ok;
-  ok = Spawn(OwlSat::Watchdog::WatchdogTask, "wdt", OWLSAT_STACK_WATCHDOG, OWLSAT_PRIO_WATCHDOG)
+  ok = Spawn(blink, "blink", OwlSat::Config::STACK_BLINK, OwlSat::Config::PRIO_BLINK) && ok;
+  ok = Spawn(OwlSat::SensorTask, "sensor", OwlSat::Config::STACK_SENSOR, OwlSat::Config::PRIO_SENSOR) && ok;
+  ok = Spawn(OwlSat::LinkTask, "link", OwlSat::Config::STACK_LINK, OwlSat::Config::PRIO_LINK) && ok;
+  ok = Spawn(OwlSat::TransmitTask, "tx", OwlSat::Config::STACK_TRANSMIT, OwlSat::Config::PRIO_TRANSMIT) && ok;
+  ok = Spawn(OwlSat::Watchdog::WatchdogTask, "wdt", OwlSat::Config::STACK_WATCHDOG, OwlSat::Config::PRIO_WATCHDOG)
        && ok;
 
   if (!ok) {

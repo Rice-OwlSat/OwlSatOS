@@ -52,16 +52,16 @@ namespace OwlSat::Watchdog {
   void Init() {
     const TickType_t now = xTaskGetTickCount();
 
-    g_deadline[static_cast<size_t>(Client::Sensor)]   = pdMS_TO_TICKS(OWLSAT_WATCHDOG_DEADLINE_SENSOR_MS);
-    g_deadline[static_cast<size_t>(Client::Link)]     = pdMS_TO_TICKS(OWLSAT_WATCHDOG_DEADLINE_LINK_MS);
-    g_deadline[static_cast<size_t>(Client::Transmit)] = pdMS_TO_TICKS(OWLSAT_WATCHDOG_DEADLINE_TRANSMIT_MS);
+    g_deadline[static_cast<size_t>(Client::Sensor)]   = pdMS_TO_TICKS(Config::WATCHDOG_DEADLINE_SENSOR_MS);
+    g_deadline[static_cast<size_t>(Client::Link)]     = pdMS_TO_TICKS(Config::WATCHDOG_DEADLINE_LINK_MS);
+    g_deadline[static_cast<size_t>(Client::Transmit)] = pdMS_TO_TICKS(Config::WATCHDOG_DEADLINE_TRANSMIT_MS);
 
     for (size_t i = 0; i < CLIENT_COUNT; ++i) {
       g_last_seen[i] = now;
       g_enabled[i] = true;
     }
 
-    g_grace_until = now + pdMS_TO_TICKS(OWLSAT_WATCHDOG_BOOT_GRACE_MS);
+    g_grace_until = now + pdMS_TO_TICKS(Config::WATCHDOG_BOOT_GRACE_MS);
   }
 
   void CheckIn(Client client) {
@@ -95,15 +95,15 @@ namespace OwlSat::Watchdog {
 
     Hal::WatchdogInit();
     printf("[wdt] kicking every %lu ms once all clients check in (boot grace %lu ms)\n",
-           (unsigned long) OWLSAT_WATCHDOG_PERIOD_MS,
-           (unsigned long) OWLSAT_WATCHDOG_BOOT_GRACE_MS);
+           (unsigned long) Config::WATCHDOG_PERIOD_MS,
+           (unsigned long) Config::WATCHDOG_BOOT_GRACE_MS);
 
     // Tracks whether the pulse train is currently running, so a stall and a recovery each log
     // once instead of every period.
     bool kicking = true;
 
     TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t period = pdMS_TO_TICKS(OWLSAT_WATCHDOG_PERIOD_MS);
+    const TickType_t period = pdMS_TO_TICKS(Config::WATCHDOG_PERIOD_MS);
 
     for (;;) {
       const TickType_t now = xTaskGetTickCount();

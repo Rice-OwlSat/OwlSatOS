@@ -95,7 +95,7 @@ namespace OwlSat::Hal {
    *
    * The in-RAM storage table is the system of record while this returns false, which it always
    * does on this branch. Records therefore survive only as long as power does — the loss window
-   * is OWLSAT_TABLE_CAPACITY records wide and closes when the storage branch merges.
+   * is Config::TABLE_CAPACITY records wide and closes when the storage branch merges.
    *
    * @return False if the record was not durably written.
    */

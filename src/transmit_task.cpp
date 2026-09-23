@@ -23,8 +23,8 @@ namespace OwlSat {
      * Working buffers, file-static rather than on the stack.
      *
      * Together they are a little over a kilobyte, and a task stack is measured in words. Putting
-     * them in .bss keeps OWLSAT_STACK_TRANSMIT honest and keeps a change to
-     * OWLSAT_PACKET_MAX_PAYLOAD from quietly turning into a stack overflow. Only this task
+     * them in .bss keeps Config::STACK_TRANSMIT honest and keeps a change to
+     * Config::PACKET_MAX_PAYLOAD from quietly turning into a stack overflow. Only this task
      * touches them, so no lock is needed.
      */
     TelemetryRecord g_batch[OWLSAT_RECORDS_PER_FRAME];
@@ -35,7 +35,7 @@ namespace OwlSat {
     /// that were never acquired.
     uint32_t g_frame_seq = 1;
 
-    /// How many idle waits pass before the task reports the backlog. At OWLSAT_TRANSMIT_WAIT_MS
+    /// How many idle waits pass before the task reports the backlog. At Config::TRANSMIT_WAIT_MS
     /// this is roughly one line a minute while the link is down.
     constexpr uint32_t IDLE_LOG_INTERVAL = 30;
 
@@ -64,7 +64,7 @@ namespace OwlSat {
                                                    EVT_LINK_READY,
                                                    pdFALSE,  // leave the bit for the next pass
                                                    pdTRUE,   // wait for all bits in the set
-                                                   pdMS_TO_TICKS(OWLSAT_TRANSMIT_WAIT_MS));
+                                                   pdMS_TO_TICKS(Config::TRANSMIT_WAIT_MS));
 
       if ((bits & EVT_LINK_READY) == 0) {
         if (idle_waits % IDLE_LOG_INTERVAL == 0) {
@@ -83,7 +83,7 @@ namespace OwlSat {
       // and cannot outrun the link's own idea of how many frames it will take — the link task
       // re-polls between bursts and will clear the bit if the radio pushes back.
       uint32_t frames_sent = 0;
-      for (uint32_t i = 0; i < OWLSAT_PACKET_BURST_LIMIT; ++i) {
+      for (uint32_t i = 0; i < Config::PACKET_BURST_LIMIT; ++i) {
         const size_t count = StorageTable::PeekPending(g_batch, OWLSAT_RECORDS_PER_FRAME);
         if (count == 0) {
           break;
@@ -126,12 +126,12 @@ namespace OwlSat {
 
         // Let the radio drain and let lower-priority work run. The LTM-1 is behind a CAN bridge
         // and will not swallow frames back to back at this task's speed.
-        vTaskDelay(pdMS_TO_TICKS(OWLSAT_TRANSMIT_GAP_MS));
+        vTaskDelay(pdMS_TO_TICKS(Config::TRANSMIT_GAP_MS));
       }
 
       if (frames_sent == 0) {
         // Link is up but there is nothing to send. Sleep rather than spin on a set event bit.
-        vTaskDelay(pdMS_TO_TICKS(OWLSAT_TRANSMIT_WAIT_MS));
+        vTaskDelay(pdMS_TO_TICKS(Config::TRANSMIT_WAIT_MS));
       }
     }
   }

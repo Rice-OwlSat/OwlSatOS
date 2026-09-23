@@ -17,12 +17,12 @@ namespace OwlSat::StorageTable {
   namespace {
 
     /// The ring. Statically allocated — the flight heap is for tasks, not for science buffers.
-    TelemetryRecord g_records[OWLSAT_TABLE_CAPACITY];
+    TelemetryRecord g_records[Config::TABLE_CAPACITY];
 
     SemaphoreHandle_t g_mutex = nullptr;
 
     size_t   g_head  = 0; ///< Index the next append writes to.
-    size_t   g_count = 0; ///< Rows currently valid, <= OWLSAT_TABLE_CAPACITY.
+    size_t   g_count = 0; ///< Rows currently valid, <= Config::TABLE_CAPACITY.
     uint32_t g_next_seq = 1; ///< Sequence numbers start at 1; 0 means "no record".
 
     /**
@@ -39,7 +39,7 @@ namespace OwlSat::StorageTable {
 
     /// Index of the oldest valid row.
     inline size_t OldestIndex() {
-      return (g_head + OWLSAT_TABLE_CAPACITY - g_count) % OWLSAT_TABLE_CAPACITY;
+      return (g_head + Config::TABLE_CAPACITY - g_count) % Config::TABLE_CAPACITY;
     }
 
     inline bool Lock() {
@@ -80,7 +80,7 @@ namespace OwlSat::StorageTable {
     // Full ring: the row about to be overwritten is the oldest one. If the downlink never got
     // to it, that is a real loss and is counted as one — and the cursor is dragged past it so
     // the transmit task is not left hunting for a sequence number that no longer exists.
-    if (g_count == OWLSAT_TABLE_CAPACITY) {
+    if (g_count == Config::TABLE_CAPACITY) {
       const uint32_t victim_seq = g_records[g_head].seq;
       if (victim_seq > g_sent_thru_seq) {
         ++g_dropped;
@@ -99,7 +99,7 @@ namespace OwlSat::StorageTable {
     // holding the lock across it would put the transmit task behind the storage driver.
     const TelemetryRecord persisted = row;
 
-    g_head = (g_head + 1) % OWLSAT_TABLE_CAPACITY;
+    g_head = (g_head + 1) % Config::TABLE_CAPACITY;
     ++g_count;
     ++g_appended;
 
@@ -127,7 +127,7 @@ namespace OwlSat::StorageTable {
       if (row.seq > g_sent_thru_seq) {
         out[written++] = row;
       }
-      idx = (idx + 1) % OWLSAT_TABLE_CAPACITY;
+      idx = (idx + 1) % Config::TABLE_CAPACITY;
     }
 
     Unlock();
@@ -151,7 +151,7 @@ namespace OwlSat::StorageTable {
         if (row_seq > g_sent_thru_seq && row_seq <= seq) {
           ++g_downlinked;
         }
-        idx = (idx + 1) % OWLSAT_TABLE_CAPACITY;
+        idx = (idx + 1) % Config::TABLE_CAPACITY;
       }
       g_sent_thru_seq = seq;
     }
@@ -187,7 +187,7 @@ namespace OwlSat::StorageTable {
       if (g_records[idx].seq > g_sent_thru_seq) {
         ++stats.pending;
       }
-      idx = (idx + 1) % OWLSAT_TABLE_CAPACITY;
+      idx = (idx + 1) % Config::TABLE_CAPACITY;
     }
 
     Unlock();

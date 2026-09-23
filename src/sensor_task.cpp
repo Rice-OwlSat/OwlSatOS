@@ -32,7 +32,7 @@ namespace OwlSat {
     const bool sensor_up = Hal::UvInit();
     printf("[sensor] EUV chain %s; sampling every %lu ms\n",
            sensor_up ? "up" : "DOWN (sampling anyway, expect faults)",
-           (unsigned long) OWLSAT_SENSOR_PERIOD_MS);
+           (unsigned long) Config::SENSOR_PERIOD_MS);
 
     uint32_t failures = 0;
 
@@ -42,7 +42,7 @@ namespace OwlSat {
     // however long the array happened to take. Science cadence has to be a property of the
     // schedule, not of the sensor's mood.
     TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t period = pdMS_TO_TICKS(OWLSAT_SENSOR_PERIOD_MS);
+    const TickType_t period = pdMS_TO_TICKS(Config::SENSOR_PERIOD_MS);
 
     for (;;) {
       Watchdog::CheckIn(Watchdog::Client::Sensor);

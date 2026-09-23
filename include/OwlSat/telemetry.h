@@ -51,11 +51,11 @@ namespace OwlSat {
    */
   struct UvSample {
     /// Right-aligned ADC code per face. 12-bit part; uint16_t holds any code up to 16 bits.
-    uint16_t code[OWLSAT_UV_FACE_COUNT];
+    uint16_t code[Config::UV_FACE_COUNT];
     /// Gain step in force per face. A code without its gain is meaningless.
-    uint8_t  gain[OWLSAT_UV_FACE_COUNT];
+    uint8_t  gain[Config::UV_FACE_COUNT];
     /// Per-face SXUV5Flag bits — saturation, dark, fault, disabled.
-    uint16_t face_flags[OWLSAT_UV_FACE_COUNT];
+    uint16_t face_flags[Config::UV_FACE_COUNT];
     /// Reconstructed normal-incidence irradiance [W/m²]. Zero when unsolved.
     float    irradiance_w_m2;
     /// 1σ uncertainty on the above [W/m²].
@@ -114,7 +114,7 @@ namespace OwlSat {
 
   /// Largest frame this build can emit [bytes].
   constexpr size_t OWLSAT_FRAME_MAX_BYTES =
-      OWLSAT_FRAME_HEADER_BYTES + OWLSAT_PACKET_MAX_PAYLOAD + OWLSAT_FRAME_CRC_BYTES;
+      OWLSAT_FRAME_HEADER_BYTES + Config::PACKET_MAX_PAYLOAD + OWLSAT_FRAME_CRC_BYTES;
 
   /**
    * @brief Serialised size of one record [bytes].
@@ -122,17 +122,17 @@ namespace OwlSat {
    * seq(4) + uptime(4) + irradiance(4) + sigma(4) + flags(2) + face_mask(1)
    *        + timestamp(4) + 5 x (code(2) + gain(1) + face_flags(2))
    */
-  constexpr size_t OWLSAT_RECORD_WIRE_BYTES = 23 + (5 * OWLSAT_UV_FACE_COUNT);
+  constexpr size_t OWLSAT_RECORD_WIRE_BYTES = 23 + (5 * Config::UV_FACE_COUNT);
 
   /// A TelemetryBatch payload opens with a one-byte record count.
   constexpr size_t OWLSAT_BATCH_HEADER_BYTES = 1;
 
   /// Records that fit in one frame at the configured payload limit.
   constexpr size_t OWLSAT_RECORDS_PER_FRAME =
-      (OWLSAT_PACKET_MAX_PAYLOAD - OWLSAT_BATCH_HEADER_BYTES) / OWLSAT_RECORD_WIRE_BYTES;
+      (Config::PACKET_MAX_PAYLOAD - OWLSAT_BATCH_HEADER_BYTES) / OWLSAT_RECORD_WIRE_BYTES;
 
   static_assert(OWLSAT_RECORDS_PER_FRAME >= 1,
-                "OWLSAT_PACKET_MAX_PAYLOAD cannot hold a single record");
+                "Config::PACKET_MAX_PAYLOAD cannot hold a single record");
 
 
   // =========================================================================

@@ -116,25 +116,25 @@ namespace OwlSat::Hal {
     // Not a stub. WDT_WDI is a line the flight computer owns directly — there is no external
     // part to drive it through — so it needs no branch to land. The pin number and the pulse
     // width are still placeholders from pin_assignment.h, which is why this says so out loud.
-#if OWLSAT_PIN_IS_ASSIGNED(WDT_WDI)
-    gpio_init(WDT_WDI);
-    gpio_set_dir(WDT_WDI, GPIO_OUT);
-    gpio_put(WDT_WDI, 0);
-    printf("[hal] WatchdogInit: WDT_WDI on GPIO %d (placeholder pin, %d us pulse)\n",
-           WDT_WDI, WDT_WDI_PULSE_US);
-#else
-    printf("[hal] WatchdogInit: WDT_WDI unassigned; pulses go to the console only\n");
-#endif
+    if constexpr (Pins::IsAssigned(Pins::WDT_WDI)) {
+      gpio_init(Pins::WDT_WDI);
+      gpio_set_dir(Pins::WDT_WDI, GPIO_OUT);
+      gpio_put(Pins::WDT_WDI, 0);
+      printf("[hal] WatchdogInit: WDT_WDI on GPIO %d (placeholder pin, %u us pulse)\n",
+             Pins::WDT_WDI, (unsigned) Pins::WDT_WDI_PULSE_US);
+    } else {
+      printf("[hal] WatchdogInit: WDT_WDI unassigned; pulses go to the console only\n");
+    }
   }
 
   void WatchdogPulse() {
     // Silent by design. This runs several times a second, and a printf here would drown the
     // console and put newlib's formatting on the one path that has to stay cheap and reliable.
-#if OWLSAT_PIN_IS_ASSIGNED(WDT_WDI)
-    gpio_put(WDT_WDI, 1);
-    busy_wait_us(WDT_WDI_PULSE_US);
-    gpio_put(WDT_WDI, 0);
-#endif
+    if constexpr (Pins::IsAssigned(Pins::WDT_WDI)) {
+      gpio_put(Pins::WDT_WDI, 1);
+      busy_wait_us(Pins::WDT_WDI_PULSE_US);
+      gpio_put(Pins::WDT_WDI, 0);
+    }
     // TBC: WDT_WDI_PULSE_US is a placeholder until the external part is selected. Widen it to
     // that part's datasheet minimum, not to whatever happens to work on the bench.
   }

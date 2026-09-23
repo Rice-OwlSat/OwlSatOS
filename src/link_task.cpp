@@ -37,7 +37,7 @@ namespace OwlSat {
     const bool radio_up = Hal::RadioInit();
     printf("[link] radio %s; polling readiness every %lu ms\n",
            radio_up ? "up" : "DOWN (will keep asking)",
-           (unsigned long) OWLSAT_LINK_POLL_PERIOD_MS);
+           (unsigned long) Config::LINK_POLL_PERIOD_MS);
 
     EventGroupHandle_t events = TaskEvents();
     configASSERT(events != nullptr);
@@ -47,7 +47,7 @@ namespace OwlSat {
     Hal::LinkState last_state = Hal::LinkState::Ready;
 
     TickType_t last_wake = xTaskGetTickCount();
-    const TickType_t period = pdMS_TO_TICKS(OWLSAT_LINK_POLL_PERIOD_MS);
+    const TickType_t period = pdMS_TO_TICKS(Config::LINK_POLL_PERIOD_MS);
 
     for (;;) {
       Watchdog::CheckIn(Watchdog::Client::Link);

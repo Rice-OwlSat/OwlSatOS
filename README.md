@@ -115,7 +115,7 @@ is level with `master` because nothing is part-way through integration.
   device address, included by every branch rather than copied. Read the "Pin budget" note at the
   bottom of it before adding a signal: an RP2350A has 30 GPIO, the block diagram wants about
   thirty-five, and the shortfall is why `MAG_STAT`, both `LTC4121_*_FAULT` lines, `BURN_1` and
-  `USER_BUTTON` are `OWLSAT_PIN_UNASSIGNED` rather than numbered
+  `USER_BUTTON` are `Pins::UNASSIGNED` rather than numbered
 
 `CMakeLists.txt` globs `src/*.c` and `src/*.cpp` with `CONFIGURE_DEPENDS`, so a new source file is
 picked up without a manual re-configure. Master links `pico_stdlib`, `hardware_pwm` and the
@@ -168,7 +168,7 @@ what has to happen for the first assembled board to fly the full task graph:
    "yes, it behaves like NOR" answer is a driver swap and a "no" changes the plan rather than
    the code.
 2. **Merge `sxuv5-interface` into `dev`.** Rewrite the EUV section of `hal_stub.cpp` per its
-   `MERGE:` note and `static_assert` that `OWLSAT_UV_FACE_COUNT` equals `SXUV5_FACE_COUNT`. The branch's
+   `MERGE:` note and `static_assert` that `Config::UV_FACE_COUNT` equals `SXUV5_FACE_COUNT`. The branch's
    `CMakeLists.txt` already adds `hardware_i2c`, so the merge carries it. The constants marked
    TBC stay TBC until the hardware lead signs them off; the driver runs on placeholders and says
    so at compile time.
@@ -212,7 +212,7 @@ designed, someone has to supply: sample rate per stream, how many streams, wheth
 24 B or 32 B, how often ground drains the log, and whether losing the oldest data is acceptable
 (`storage_api.md` §12.A). Until then `Hal::StorageAppend()` returns false — on every branch,
 including `nonvolatile-data-storage`, whose region layer is the floor this would be built on —
-and records survive only as long as power does, in the `OWLSAT_TABLE_CAPACITY`-record ring
+and records survive only as long as power does, in the `Config::TABLE_CAPACITY`-record ring
 (256 records) on master.
 
 ### TASK: Parse and store sensor/gyro data

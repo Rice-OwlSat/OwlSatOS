@@ -15,11 +15,11 @@ Five FreeRTOS tasks, created in `main()` (`src/OwlSatOS.cpp`) and started under 
 
 | Task | Entry point | Priority | Cadence | Watchdog client |
 |---|---|---|---|---|
-| `sensor` | `OwlSat::SensorTask` | 1 | `OWLSAT_SENSOR_PERIOD_MS` (5 s) | yes |
-| `link` | `OwlSat::LinkTask` | 1 | `OWLSAT_LINK_POLL_PERIOD_MS` (1 s) | yes |
-| `tx` | `OwlSat::TransmitTask` | 2 | event-driven, `OWLSAT_TRANSMIT_WAIT_MS` timeout | yes |
-| `wdt` | `OwlSat::Watchdog::WatchdogTask` | 2 | `OWLSAT_WATCHDOG_PERIOD_MS` (250 ms) | is the watchdog |
-| `blink` | `blink` | 1 | `OWLSAT_BLINK_HALF_PERIOD_MS` | no, on purpose |
+| `sensor` | `OwlSat::SensorTask` | 1 | `Config::SENSOR_PERIOD_MS` (5 s) | yes |
+| `link` | `OwlSat::LinkTask` | 1 | `Config::LINK_POLL_PERIOD_MS` (1 s) | yes |
+| `tx` | `OwlSat::TransmitTask` | 2 | event-driven, `Config::TRANSMIT_WAIT_MS` timeout | yes |
+| `wdt` | `OwlSat::Watchdog::WatchdogTask` | 2 | `Config::WATCHDOG_PERIOD_MS` (250 ms) | is the watchdog |
+| `blink` | `blink` | 1 | `Config::BLINK_HALF_PERIOD_MS` | no, on purpose |
 
 Three services sit under them, all in `include/OwlSat/`:
 
@@ -73,7 +73,7 @@ vTaskStartScheduler();
 - `StorageTable::Init()` and `InitTaskEvents()` **must** run before any task is created. Tasks use
   both without checking.
 - `Watchdog::Init()` must run before `vTaskStartScheduler()`, because the boot grace period
-  (`OWLSAT_WATCHDOG_BOOT_GRACE_MS`, 10 s) is timed from it.
+  (`Config::WATCHDOG_BOOT_GRACE_MS`, 10 s) is timed from it.
 - A fatal init failure calls `HaltForWatchdog()`: it prints, disables interrupts and spins. It
   never pulses `WDT_WDI`, so the external watchdog resets the board. That is the recovery path.
 
@@ -112,7 +112,7 @@ Lines that mean something is wrong:
 | Line | Meaning | What to do |
 |---|---|---|
 | `FATAL: could not create task ...` | FreeRTOS heap exhausted at boot | lower stack depths in `config.h` or raise `configTOTAL_HEAP_SIZE` |
-| `FATAL: stack overflow in task 'x'` | a task blew its stack | raise `OWLSAT_STACK_x`; `printf` is the usual culprit |
+| `FATAL: stack overflow in task 'x'` | a task blew its stack | raise `Config::STACK_x`; `printf` is the usual culprit |
 | `[wdt] STALL: sensor last checked in ...` | a task missed its deadline | that task is blocked somewhere — I2C wedge, mutex, infinite loop |
 | `[sensor] ERROR: storage table rejected a record` | table not initialised | should be impossible after boot; look at `main()` |
 | `[tx] frame N rejected` | radio refused a frame | normal on a marginal link; records stay pending |
@@ -140,7 +140,7 @@ void MyTask(void *params) {
 
   // 2. Fixed-reference pacing so cadence does not drift with work time.
   TickType_t last_wake = xTaskGetTickCount();
-  const TickType_t period = pdMS_TO_TICKS(OWLSAT_MY_PERIOD_MS);
+  const TickType_t period = pdMS_TO_TICKS(Config::MY_PERIOD_MS);
 
   for (;;) {
     // 3. Check in FIRST, after the blocking call that paces you has returned.
@@ -155,8 +155,8 @@ void MyTask(void *params) {
 
 Then, in this order:
 
-1. **`config.h`** — add `OWLSAT_MY_PERIOD_MS`, `OWLSAT_PRIO_MY`, `OWLSAT_STACK_MY`, and
-   `OWLSAT_WATCHDOG_DEADLINE_MY_MS` derived from the period with `OWLSAT_WATCHDOG_MARGIN`.
+1. **`config.h`** — add `Config::MY_PERIOD_MS`, `Config::PRIO_MY`, `Config::STACK_MY`, and
+   `Config::WATCHDOG_DEADLINE_MY_MS` derived from the period with `Config::WATCHDOG_MARGIN`.
    Never write the deadline as an independent literal.
 2. **`watchdog.h`** — add `Client::My` *before* `Count`. Then in `watchdog_task.cpp` add its
    deadline to `Init()` and its name to `ClientName()`.
@@ -222,7 +222,7 @@ Rules:
 
 - `PeekPending()` **copies**. Never hold a pointer into the ring; the sensor task overwrites it.
 - Every call takes the table mutex. Safe from any task, **not from an ISR**.
-- Capacity is `OWLSAT_TABLE_CAPACITY` (256 records, about 21 minutes at the default cadence).
+- Capacity is `Config::TABLE_CAPACITY` (256 records, about 21 minutes at the default cadence).
   When full, the oldest record is overwritten and `Stats::dropped` increments. If you see drops
   climbing on the console, the downlink is not keeping up; that is information, not a bug.
 
@@ -248,14 +248,14 @@ end-to-end check across the CAN hop, so keep it even if the link layer adds its 
 
 All the knobs are in `include/OwlSat/config.h`. When you change one:
 
-- **Periods** feed the watchdog deadlines automatically (`period × OWLSAT_WATCHDOG_MARGIN`). You
+- **Periods** feed the watchdog deadlines automatically (`period × Config::WATCHDOG_MARGIN`). You
   cannot arm a spurious reset by shortening a period, but you *can* by making a task's real work
   take longer than three periods. Check the `[wdt] STALL` line after any change.
-- **`OWLSAT_WATCHDOG_PERIOD_MS`** must stay well under the external part's timeout, which is a
+- **`Config::WATCHDOG_PERIOD_MS`** must stay well under the external part's timeout, which is a
   board-level number not yet fixed. 250 ms is a placeholder.
 - **Stack depths** are in words. They are generous because the tasks `printf`. Measure with
   `uxTaskGetStackHighWaterMark()` before trimming.
-- **`OWLSAT_PACKET_MAX_PAYLOAD`** changes `OWLSAT_RECORDS_PER_FRAME` and the size of the transmit
+- **`Config::PACKET_MAX_PAYLOAD`** changes `OWLSAT_RECORDS_PER_FRAME` and the size of the transmit
   task's static buffers. It also changes how many CAN chunks a frame needs on the radio branch.
 
 ---

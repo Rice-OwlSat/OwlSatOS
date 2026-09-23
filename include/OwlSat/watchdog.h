@@ -76,7 +76,7 @@ namespace OwlSat::Watchdog {
   /**
    * @brief The kick task. Never returns.
    *
-   * Pulses WDT_WDI every OWLSAT_WATCHDOG_PERIOD_MS for as long as every registered client is
+   * Pulses WDT_WDI every Config::WATCHDOG_PERIOD_MS for as long as every registered client is
    * inside its deadline. On the first late client it stops pulsing, reports which one and by how
    * much, and keeps checking — if the client recovers before the external part times out, the
    * pulse train resumes and no reset happens.
