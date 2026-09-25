@@ -5,3 +5,7 @@ docs/html/
 docs/latex/
 .idea/
 .cache/
+
+documents/
+
+!documents/documents_info.md

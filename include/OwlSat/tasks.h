@@ -81,4 +81,12 @@ namespace OwlSat {
    */
   void TransmitTask(void *params);
 
+  /**
+   * @brief Checks MRAM registers for any problems
+   *
+   *
+   * @param params Unused (pass nullptr).
+   */
+  void MRAMWatchdogTask(void *params);
+
 } // namespace OwlSat
