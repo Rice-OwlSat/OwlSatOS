@@ -77,7 +77,6 @@ off — so the board enumerates as a serial port and the boot banner arrives the
 | `docs/tutorials/flight_tasks.md`        | `master`                   | boot order, console output, adding a task, landing a driver behind `hal.h`   |
 | `docs/tutorials/radio_link.md`          | `radio`                    | the LTM-1 CAN link, the controller driver contract, science and health paths |
 | `docs/tutorials/sxuv5_euv.md`           | `sxuv5-interface`          | taking an EUV reading, the flags, bench testing, calibration                 |
-| `docs/tutorials/nonvolatile_storage.md` | `nonvolatile-data-storage` | config and latched flags against the designed API                            |
 
 ## Branch map
 Each piece of hardware has its own branch. Work stays scoped to its branch until it is complete,
@@ -93,13 +92,13 @@ branch merges by rewriting its section of `src/hal_stub.cpp` and nothing above i
 | `dev`                         | The integration branch: every feature branch merges here first, and `master` is only moved once what is on `dev` is confirmed stable.                                                                                                                                                                                                                                          | Level with `master` — nothing is mid-integration right now                                                                                                          | —                                                                                                                                      |
 | `radio`                       | AMSAT LTM-1 link over CAN: `Hal::Radio*` implemented in `src/ltm1_link.cpp`.                                                                                                                                                                                                                        | Protocol layer complete and `static_assert`ed against the vendor spec; bus layer stubbed in `src/can_controller_stub.cpp`                                                   | **SPI CAN controller part selection** (MCP2515 vs MCP2518FD share no register map). Also: outstanding vendor-spec integration items |
 | `sxuv5-interface`             | EUV science chain driver, four layers: transport (SENS_PWR, MUXSEL, GAINSEL, ADS7828 on I2C0), auto-ranged acquisition, conversion to irradiance with σ, and reconstruction of true irradiance from the five face projections.                                                                                                                                                 | Complete against placeholder constants; builds. Its `CMakeLists.txt` already adds `hardware_i2c`                                                                    | Hardware lead confirming TIA feedback resistances, bias mode, mux channel map, settling times; harness pin numbers                     |
-| `nonvolatile-data-storage`    | The region layer is **written** — `include/OwlSat/storage.h` and `src/storage.c`, bounds-checked named spans over the top half of the QSPI device — and `Hal::StorageInit()` brings it up. `CMakeLists.txt` there adds `hardware_flash`, `pico_flash` and `PICO_FLASH_ASSUME_CORE1_SAFE`. The K/V config store and the one-shot latches above it are designed but not written. | Layer 1 done and wired into the hal; `Hal::StorageAppend()` still returns false                                                                                     | **Hardware confirming the RP2350 boots from the MRAM on CS0.** Until then software assumes 2 MiB NOR-flash semantics                   |
+| `mram-interface`              | MRAM driver for the Avalanche AS3016204 (fitted, 2 MiB) and AS3064204 (prospective, 8 MiB), chosen at compile time: `include/OwlSat/mram.h` (API), `mram_core.h`, one header per part, `mram_config.h` (every editable value), `src/mram.cpp`, `src/mram_transactions.cpp`. XIP-safe transactions for an image that runs from the MRAM. Bench tools: `MRAM_Probe` (`docs/mram_mode_probe.md`) and the `MRAM_Test_*` targets. | API complete. Passes on the AS3016204 board from SRAM and from an image executing in place under FreeRTOS. The AS3064204 side builds but has never seen hardware | An AS3064204 to bench. Not yet behind `hal.h`: no storage layer uses it                                                               |
 | `imu`                         | Nothing yet — created from `master` and currently identical to it. Intended home for the IMU and magnetometer on I2C0.                                                                                                                                                                                                                                                         | Placeholder; unowned                                                                                                                                                | —                                                                                                                                      |
 
 `flight-tasks` is gone: it merged at `3d51aae` and the branch was deleted. Its tutorial survives
-as `docs/tutorials/flight_tasks.md`. The two `DEPRECATED-` branches exist on the remote only and
-are not meant to be checked out. `dev` and `imu` exist on both; `imu` carries no work, and `dev`
-is level with `master` because nothing is part-way through integration.
+as `docs/tutorials/flight_tasks.md`. The `DEPRECATED-` branches are not meant to be checked out.
+`imu` carries no work, and `dev` is level with `master` because nothing is part-way through
+integration.
 
 ## What is currently working (master)
 - The tree configures and builds from `CMakePresets.json`: `cmake --build --preset pico2-release`
@@ -136,8 +135,8 @@ Everything they can be tuned by lives in `include/OwlSat/config.h`.
 
 **The hardware drivers are not on this branch.** `sensor`, `link` and `tx` talk to hardware only
 through `include/OwlSat/hal.h`, and every function in it is stubbed in `src/hal_stub.cpp` to
-report failure — the EUV chain is on `sxuv5-interface`, the store on `nonvolatile-data-storage`,
-the radio on `radio`. Each stub carries a `MERGE:` comment naming the call that replaces it.
+report failure — the EUV chain is on `sxuv5-interface`, the MRAM driver on `mram-interface`,
+the radio on `radio`. Nothing yet turns the MRAM driver into the store `hal.h` asks for. Each stub carries a `MERGE:` comment naming the call that replaces it.
 Nothing above `hal.h` should need to change when they land.
 
 So this build boots, runs the whole task graph, and honestly reports that it acquired nothing,
@@ -160,13 +159,12 @@ the external circuit resets the board. Deadlines are derived from the task perio
 not written independently, so retuning a period cannot arm a spurious reset.
 
 ## Path to the assembled-board prototype
-The board gets assembled once hardware has the MRAM booting. In the order the dependencies run,
-what has to happen for the first assembled board to fly the full task graph:
+The MRAM question is answered on the test board: the RP2350 boots from the AS3016204 on CS0, and
+`mram-interface` drives it, including from an image that executes in place. In the order the
+dependencies run, what has to happen for the first assembled board to fly the full task graph:
 
-1. **Hardware answers the MRAM question.** Does the RP2350 boot from it, and does `hardware_flash`
-   drive it? Everything on `nonvolatile-data-storage` waits on this; the design is written so a
-   "yes, it behaves like NOR" answer is a driver swap and a "no" changes the plan rather than
-   the code.
+1. **Merge `mram-interface` into `dev`.** It adds `hardware_flash`, `pico_flash` and
+   `PICO_FLASH_ASSUME_CORE1_SAFE` to the build. Nothing above `hal.h` changes.
 2. **Merge `sxuv5-interface` into `dev`.** Rewrite the EUV section of `hal_stub.cpp` per its
    `MERGE:` note and `static_assert` that `Config::UV_FACE_COUNT` equals `SXUV5_FACE_COUNT`. The branch's
    `CMakeLists.txt` already adds `hardware_i2c`, so the merge carries it. The constants marked
@@ -176,9 +174,8 @@ what has to happen for the first assembled board to fly the full task graph:
    `src/can_controller_stub.cpp` becomes a real driver for the five calls in `can_controller.h`;
    nothing else on the branch changes.
    The `link` task already drains the bus and the `tx` task already sends.
-4. **Finish `nonvolatile-data-storage`.** The region layer is written and `Hal::StorageInit()`
-   already brings it up; what is missing is layer 2 — the K/V config store and the latches — and
-   `Hal::StorageAppend()` behind it. Config and the antenna-deployed latch come from this; bulk
+4. **Build the storage layer on the MRAM driver.** `Hal::StorageInit()` is still a stub, and the
+   config store and latches behind it are not written. Config and the antenna-deployed latch come from this; bulk
    telemetry does not.
 5. **Confirm the pin numbers.** Every number in `pin_assignment.h` is a placeholder until the
    harness drawing is released, and five signals have no pin at all. `WDT_WDI` and `RADIO_PWR` do
@@ -189,19 +186,34 @@ what has to happen for the first assembled board to fly the full task graph:
 Tasks are not ordered by priority. Once a task is complete, open a pull request into `dev` with
 verbose documentation; `master` moves separately, once the result has been confirmed stable.
 
-### TASK: Nonvolatile storage (`nonvolatile-data-storage` branch)
-The FAT12 filesystem plan is superseded — see `docs/internal/storage_api.md` §10 for the
-reasoning, which should not be relitigated. What replaces it is a region layer over the top
-1024 KB of the QSPI device, an A/B-banked key/value store for config, and a write-once latch
-region for flags that must never revert (antenna deployed, first boot done).
+### TASK: MRAM driver (`mram-interface` branch)
+`include/OwlSat/mram.h` is the API: `Init`, `VerifyConfig`, `ApplyConfig`, `ReadID`,
+`ReadRegister`, `WriteRegister`, `Read` and `Write`, all in single-lane SPI. The part is picked
+by `Config::MRAMPart` in `mram_config.h`, which also holds every register value, timing and bus
+setting. With `Config::MRAM_EXECUTE_IN_PLACE` (the default) each transaction runs from SRAM inside
+`flash_safe_execute()` and suspends XIP around itself. Bench-tested on the AS3016204 over UART:
+`MRAM_Test_Read`, `MRAM_Test_Write` (both from SRAM) and `MRAM_Test_XIP` (from the MRAM, under
+FreeRTOS) all pass. Open:
+- Bench the AS3064204 once one is in hand. Its RDID and its register reads at MLATS = 8 come from
+  the datasheet only
+- Test array writes with CR4.WRENS = Normal, the flight setting. The test board is still at the
+  factory SRAM setting, where array writes don't need WREN
+- Decide whether `ApplyConfig()` runs on the flight board: it sets CR1.MAPLK, which locks block
+  protection, and CR4.WRENS = Normal
+- Decide between an XIP design and `copy_to_ram`. `Config::MRAM_EXECUTE_IN_PLACE` switches the
+  driver; the build checks it against the binary type
+- A mutex around the driver for when more than one task uses it, and a guard that stops writes
+  landing in the running image
+- `MRAMWatchdogTask` is empty. `VerifyConfig()` is the check it is meant to run
 
-`storage.[ch]` — the region layer — is now implemented on the branch (`87af267`): bounds-checked
-at compile time, once at boot against `__flash_binary_end`, and on every call, and mounted by
-`Hal::StorageInit()`. Open:
-- Implement `nvm.[ch]` (the A/B-banked K/V store) and `latch.[ch]` (the write-once flags) on top
-  of it; the tutorial has the order
-- Confirm the fitted part's worst-case sector erase time and the external watchdog timeout —
-  a commit runs with interrupts off and can reset the satellite through the task-driven watchdog
+### TASK: Nonvolatile storage
+Built on the MRAM driver; no branch yet. The FAT12 filesystem plan stays superseded. The planned
+replacement is a key/value store for config and a write-once latch region for flags that must
+never revert (antenna deployed, first boot done), over the top half of the MRAM. The MRAM has no
+erase and writes bytes in place, so NOR-flash constraints from the earlier design (sector erase
+time, erase-before-write banking) no longer apply. A driver write holds interrupts off for one
+transaction of at most 256 bytes. Open:
+- Implement the config store and the latches, and `Hal::StorageInit()` behind them
 - Decide how `PICO_FLASH_SIZE_BYTES` is set for the flight board (custom board header or CMake
   define); today a build silently uses the dev board's 4 MB
 
@@ -209,11 +221,9 @@ at compile time, once at boot against `__flash_binary_end`, and on every call, a
 The storage design deliberately does not cover the sensor/gyro log — a high-write-rate ring with
 different constraints from a config store. It has **no owner and no branch**. Before it can be
 designed, someone has to supply: sample rate per stream, how many streams, whether the record is
-24 B or 32 B, how often ground drains the log, and whether losing the oldest data is acceptable
-(`storage_api.md` §12.A). Until then `Hal::StorageAppend()` returns false — on every branch,
-including `nonvolatile-data-storage`, whose region layer is the floor this would be built on —
-and records survive only as long as power does, in the `Config::TABLE_CAPACITY`-record ring
-(256 records) on master.
+24 B or 32 B, how often ground drains the log, and whether losing the oldest data is acceptable.
+Until then `Hal::StorageAppend()` returns false on every branch, and records survive only as long
+as power does, in the `Config::TABLE_CAPACITY`-record ring (256 records) on master.
 
 ### TASK: Parse and store sensor/gyro data
 Depends on the bulk telemetry sink above. The `sensor` task and the in-RAM storage table are on
@@ -233,12 +243,12 @@ driver defers to.
 
 ### TASK: Deal with update requests
 - Accept an update command followed by a raw binary payload
-- For config updates: `nvm_set()` the affected keys and `nvm_commit()` once, from a task that can
-  absorb the interrupts-off window
-- For firmware updates: stage the payload in the slack between `__flash_binary_end` and
-  `STORAGE_BASE_OFFSET` (never in a storage region), verify integrity, then reboot into the new
-  image via the RP2350 bootrom — the current image must remain valid until the new one passes
-  verification. On the 2 MiB flight part this caps the running image at ~512 KB
+- For config updates: write the affected keys through the config store, from a task that can
+  absorb the interrupts-off window of each MRAM write
+- For firmware updates: stage the payload between the end of the running image and the storage
+  region (never in a storage region), verify integrity, then reboot into the new image via the
+  RP2350 bootrom — the current image must remain valid until the new one passes verification.
+  With storage in the top half of the 2 MiB AS3016204, this caps the running image at ~512 KB
 
 ### TASK: Serialize and transmit actual data (`radio` branch)
 **The framing question is answered.** The AMSAT LTM interface specification makes OwlSat the *host platform*,
@@ -266,7 +276,7 @@ The driver is complete against placeholder constants. Open:
   lower bound for half the sky
 
 ### TASK: Antenna deployment
-- Fire the burn wires once, then `latch_set(LATCH_ANTENNA_DEPLOYED)` so they never fire again
+- Fire the burn wires once, then set the antenna-deployed latch so they never fire again
 - Gate `RADIO_PWR` on that latch and on the launch provider's post-release timer; the vendor spec makes
   this an interlock, not a power switch
 
