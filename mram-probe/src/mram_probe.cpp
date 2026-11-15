@@ -41,17 +41,19 @@
 
 namespace {
 
+  using OwlSat::MRAM::AS3016204;
   using OwlSat::MRAM::Execute;
   using OwlSat::MRAM::Instruction;
+  using OwlSat::MRAM::Latency;
   using OwlSat::MRAM::Opcode;
-  namespace CR2 = OwlSat::MRAM::CR2;
+  using CR2 = AS3016204::CR2;
 
   // Test-board LEDs. Not taken from OwlSat::Pins: on the flight harness GPIO 24 is BURN_0.
   constexpr uint LED_MATCH = 25;    //!< Solid: the last RDID read E6 01 04 01
   constexpr uint LED_MISMATCH = 24; //!< Solid: the last RDID read anything else
 
   /// RDID reply in SPI mode
-  constexpr std::array<uint8_t, 4> EXPECTED_ID { 0xE6, 0x01, 0x04, 0x01 };
+  constexpr const std::array<uint8_t, 4> &EXPECTED_ID = AS3016204::EXPECTED_ID;
 
   /*!
    * Direct-mode SCK = clk_sys / DIRECT_CLKDIV, so 5 MHz at the default 150 MHz. That's the conservative
@@ -70,19 +72,20 @@ namespace {
    */
   struct InstructionBits {
     Opcode opcode;
-    size_t address_width;
-    size_t latency_cycles;
+    uint8_t address_width;
+    uint8_t latency_cycles;
+    Latency latency;
     bool needs_write_enable;
 
     constexpr bool operator==(const InstructionBits &) const = default;
   };
   static_assert(sizeof(InstructionBits) == sizeof(Instruction) && alignof(InstructionBits) == alignof(Instruction));
-  static_assert(std::bit_cast<InstructionBits>(Instruction::ReadDeviceID) == InstructionBits { Opcode::RDID, 0, 0, false });
-  static_assert(std::bit_cast<InstructionBits>(Instruction::ReadAnyRegister) == InstructionBits { Opcode::RDAR, 3, 8, false });
-  static_assert(std::bit_cast<InstructionBits>(Instruction::WriteAnyRegister) == InstructionBits { Opcode::WRAR, 3, 0, true });
+  static_assert(std::bit_cast<InstructionBits>(Instruction::ReadDeviceID) == InstructionBits { Opcode::RDID, 0, 0, Latency::None, false });
+  static_assert(std::bit_cast<InstructionBits>(AS3016204::ReadAnyRegister) == InstructionBits { Opcode::RDAR, 3, 8, Latency::Fixed, false });
+  static_assert(std::bit_cast<InstructionBits>(Instruction::WriteAnyRegister) == InstructionBits { Opcode::WRAR, 3, 0, Latency::None, true });
 
-  constexpr Instruction ENABLE_QPI = std::bit_cast<Instruction>(InstructionBits { Opcode::QPIE, 0, 0, false }); //!< 1-0-0. 4-4-4 from the next CS# cycle
-  constexpr Instruction ENABLE_DPI = std::bit_cast<Instruction>(InstructionBits { Opcode::DPIE, 0, 0, false }); //!< 1-0-0. 2-2-2 from the next CS# cycle
+  constexpr Instruction ENABLE_QPI = std::bit_cast<Instruction>(InstructionBits { Opcode::QPIE, 0, 0, Latency::None, false }); //!< 1-0-0. 4-4-4 from the next CS# cycle
+  constexpr Instruction ENABLE_DPI = std::bit_cast<Instruction>(InstructionBits { Opcode::DPIE, 0, 0, Latency::None, false }); //!< 1-0-0. 2-2-2 from the next CS# cycle
 
   // pads_qspi_hw->io[] runs SCLK, SD0, SD1, SD2, SD3, SS
   constexpr size_t PAD_SD2 = 3;
@@ -239,7 +242,7 @@ namespace {
     std::array<uint8_t, 1> sr {};
     std::array<uint8_t, 4> cr {};
     Run(Instruction::ReadStatusRegister, sr);
-    Run(Instruction::ReadConfigurationRegisters, cr);
+    Run(AS3016204::ReadConfigurationRegisters, cr);
 
     printf("RDSR  %02Xh:", OpByte(Opcode::RDSR));
     PrintBytes(sr);

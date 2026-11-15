@@ -175,19 +175,17 @@
  *
  *  6. USING THE TYPES YOU ALREADY WROTE
  *  ------------------------------------
- *    include/OwlSat/mram.h has SR and CR1..CR4 namespaces with bit masks and ::ADDRESS, which
- *    drop straight into the WRAR/RDAR buffers above. The probe's CMakeLists doesn't see that header yet:
- *        target_include_directories(MRAM_Probe PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../include)
- *    (mram.h also includes OwlSat/utility_macros.h, so the whole include/ dir is what you want.)
+ *    (Superseded 15.11.2026.) The driver now does all of the above. See include/OwlSat/mram.h:
+ *      ReadRegister(address)              RDAR, section 3
+ *      WriteRegister(address, value)      the section 1 recipe: WREN, WRAR, tCS2, read back
+ *      Read() / Write()                   memory array, READ 03h / WRTE 02h
+ *    Register addresses and fields are AS3016204::SR / ::CR1..::CR4 in mram_as3016204.h.
+ *    Flight and factory register values, including the CR4 Normal-vs-SRAM choice below, are in
+ *    mram_config.h (FLIGHT_CR4 = Normal, FACTORY_CR4 = SRAM).
  *
- *    mram.h declares ReadSR() and ReadCR1()..ReadCR4() but no writers. Whatever shape your probe's
- *    "WREN -> write -> wait 5 us -> read back" helper ends up taking is a good prototype for
- *    WriteSR(uint8_t) / WriteCR1(uint8_t)..WriteCR4(uint8_t) in the real driver.
- *
- *    One thing to double-check while you're in there: Config::CR4_DEFAULT is 0x04 (WRENS =
- *    Normal), but the datasheet factory default is 0x05 (WRENS = SRAM mode), which is what your
- *    readback showed. If Normal is a deliberate flight choice, great. Just make sure it's a
- *    decision and not a typo.
+ *    FLIGHT_CR4 is 0x04 (WRENS = Normal), but the datasheet factory default is 0x05
+ *    (WRENS = SRAM mode), which is what your readback showed. If Normal is a deliberate flight
+ *    choice, great. Just make sure it's a decision and not a typo.
  *
  * ============================================================================================
  */

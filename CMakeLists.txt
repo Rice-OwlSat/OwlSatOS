@@ -109,3 +109,25 @@ target_include_directories(MRAM_Probe PRIVATE
         include/
 )
 
+# Bench-only MRAM driver API tests (mram-test/src/mram_api_test.cpp). SRAM-only like the probe, with
+# stdio on UART0 (GP0 TX / GP1 RX, 115200) for a debug probe. MRAM_Test_Read only reads;
+# MRAM_Test_Write also writes a register (same value) and the upper half of the array (restored).
+foreach(MRAM_TEST_VARIANT IN ITEMS Read Write)
+    set(MRAM_TEST_TARGET MRAM_Test_${MRAM_TEST_VARIANT})
+    add_executable(${MRAM_TEST_TARGET} mram-test/src/mram_api_test.cpp src/mram.cpp src/mram_transactions.cpp)
+
+    if(MRAM_TEST_VARIANT STREQUAL "Write")
+        target_compile_definitions(${MRAM_TEST_TARGET} PRIVATE MRAM_TEST_WRITES=1)
+    else()
+        target_compile_definitions(${MRAM_TEST_TARGET} PRIVATE MRAM_TEST_WRITES=0)
+    endif()
+
+    target_link_libraries(${MRAM_TEST_TARGET} pico_stdlib pico_bootrom)
+    target_include_directories(${MRAM_TEST_TARGET} PRIVATE include/)
+
+    pico_set_binary_type(${MRAM_TEST_TARGET} no_flash)
+    pico_enable_stdio_usb(${MRAM_TEST_TARGET} 0)
+    pico_enable_stdio_uart(${MRAM_TEST_TARGET} 1)
+    pico_add_extra_outputs(${MRAM_TEST_TARGET})
+endforeach()
+

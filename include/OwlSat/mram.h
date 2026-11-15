@@ -1,12 +1,23 @@
 /**
 
   @file       mram.h
-  @brief      SPI MRAM chip driver — nonvolatile store.
-  @details    Driver API for Avalanche AS3016204 (16MiB chip)
+  @brief      SPI MRAM chip driver: the nonvolatile store.
+  @details    Driver API for the Avalanche serial MRAM on QMI chip select 0. Supports the AS3016204
+              (16 Mb / 2 MiB, fitted to the test board, works over SPI out of the box, bench-tested
+              23.09.2026) and the AS3064204 (64 Mb / 8 MiB, the prospective part). Which one is
+              driven is chosen at compile time by Config::MRAMPart in mram_config.h.
 
-              The part works over SPI straight out of the box (bench-tested 23.09.2026).
-              Datasheet (1Mb–16Mb Serial HP MRAM):
-              https://www.mouser.com/datasheet/3/4808/1/1Mb_16Mb_Serial_HP_MRAM.pdf
+              The API only uses what both parts have in common: register access by address (RDAR
+              65h / WRAR 71h), array access with READ 03h / WRTE 02h, and RDID 9Fh. Part-specific
+              instructions and register fields are in mram_as3016204.h and mram_as3064204.h, and
+              can be sent through Execute() directly.
+
+              Everything here runs in single-lane SPI (1-1-1). Nothing in the API switches the chip
+              into another interface mode.
+
+              Not handled here: locking between tasks, keeping execute-in-place running while the
+              bus is in use in the flight image, and stopping writes into the code region. Those
+              belong to the storage layer.
 
   @author     Viola Case
   @date       23.09.2026
@@ -14,353 +25,125 @@
 
 **/
 #pragma once
-#include <cstdint>
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <span>
-#include <OwlSat/utility_macros.h>
 
+#include <OwlSat/mram_config.h>
+#include <OwlSat/mram_core.h>
 
-namespace OwlSat {
+namespace OwlSat::MRAM {
 
-  namespace Config {
-    constexpr uint8_t CR1_DEFAULT = 0x04;
-    constexpr uint8_t CR2_DEFAULT = 0x00;
-    constexpr uint8_t CR3_DEFAULT = 0x60;
-    constexpr uint8_t CR4_DEFAULT = 0x04;
+  /*!
+   * Outcome of a driver call.
+   */
+  enum struct Result : uint8_t {
+    Ok,               //!< Done
+    NotSPI,           //!< Execute() refused: BUS_MODE isn't Mode::M1_1_1. Nothing was sent
+    WrongDevice,      //!< RDID didn't match Config::MRAMPart
+    LatencyUnknown,   //!< RDAR reads couldn't be made consistent with the no-latency reads (AS3064204)
+    ConfigMismatch,   //!< A register differs from the flight configuration. The driver still works
+    WriteNotVerified, //!< A register read back differently from what was written. Usually a protection bit
+    OutOfRange,       //!< The address range runs past the end of the array
+  };
 
+  /*!
+   * @brief   Names a Result, for logs.
+   * @param   result  The result to name
+   * @return  The enumerator's name, e.g. "WriteNotVerified"
+   */
+  const char *ResultName(Result result);
 
+  /*!
+   * @brief   Brings the driver up and checks the chip.
+   * @details In order:
+   *          1. Waits until tPU has passed since boot.
+   *          2. Reads RDID and checks it against Config::MRAMPart.
+   *          3. Establishes the RDAR latency. On the AS3016204 it's fixed, and Init() reads CR2 to
+   *             learn MLATS. On the AS3064204 RDAR's latency *is* CR2.MLATS, which is nonvolatile and
+   *             so unknown at boot. Init() compares RDAR reads of SR and FSR with RDSR and RDFSR,
+   *             which have no latency. If they disagree, it writes the flight CR2 value (writes need
+   *             no latency) and checks again. **This is the only register Init() ever writes.**
+   *          4. Runs VerifyConfig().
+   * @return  Result::Ok, or Result::ConfigMismatch if the chip works but isn't configured as
+   *          Config::MRAMActiveSettings::FLIGHT_DEFAULTS says. Any other result means the driver
+   *          can't be used.
+   */
+  Result Init();
 
-  } // namespace Config
+  /*!
+   * @brief   Compares the chip's registers with Config::MRAMActiveSettings::FLIGHT_DEFAULTS. Writes
+   *          nothing.
+   * @return  True if every register matches in the bits its entry's mask covers.
+   */
+  bool VerifyConfig();
 
-  namespace MRAM {
+  /*!
+   * @brief   Writes every register in Config::MRAMActiveSettings::FLIGHT_DEFAULTS with
+   *          WriteRegister(), verifying each one.
+   * @return  True if every write was read back correctly.
+   */
+  bool ApplyConfig();
 
-    extern enum struct Mode : uint8_t {
-      M1_1_1,
-      M2_2_2,
-      M4_4_4,
-    } BUS_MODE;
+  /*!
+   * @brief   Reads the 4-byte device ID (RDID 9Fh).
+   * @param   id  Receives the ID, manufacturer byte first
+   * @return  False if Execute() refused
+   */
+  bool ReadID(std::span<uint8_t, 4> id);
 
-    bool SwitchMode(Mode mode);
+  /*!
+   * @brief   Checks an RDID reply against Config::MRAMPart's expected ID, ignoring the bits its
+   *          ID_MASK leaves out.
+   * @param   id  An RDID reply
+   * @return  Whether it identifies the configured part
+   */
+  bool IsExpectedID(std::span<const uint8_t, 4> id);
 
-    /*!
-     * Opcodes taken from Avalanche Technology's
-     * *High Performance Serial Persistent SRAM Memory* datasheet, revision P
-     */
-    enum struct Opcode : uint8_t {
-      /*
-       * ===========================================
-       * Control instructions
-       * ===========================================
-       */
-      NOOP = 0x00, //!< No operation
-      WREN = 0x06, //!< Write enable
-      WRDI = 0x04, //!< Write disable
-      DPIE = 0x37, //!< Enable DPI
-      QPIE = 0x38, //!< Enable QPI
-      SPIE = 0xFF, //!< Enable SPI
-      DPDE = 0xB9, //!< Enter deep power down
-      HBNE = 0xBA, //!< Enter hibernate
-      SRTE = 0x66, //!< Software reset enable
-      SRST = 0x99, //!< Software reset
-      DPDX = 0xAB, //!< Exit deep power down
-      /*
-       * ===========================================
-       * Read register instructions
-       * ===========================================
-       */
-      RDSR = 0x05, //!< Read status register
-      RDC1 = 0x35, //!< Read configuration register 1
-      RDC2 = 0x3F, //!< Read configuration register 2
-      RDC3 = 0x44, //!< Read configuration register 3
-      RDC4 = 0x45, //!< Read configuration register 4
-      RDCX = 0x46, //!< Read configuration register 1, 2, 3, 4
-      RDID = 0x9F, //!< Read device ID
-      RUID = 0x4C, //!< Read unique ID
-      RDSN = 0xC3, //!< Read serial number register
-      RDAP = 0x14, //!< Read augmented array protection register
-      RDAR = 0x65, //!< Read any register - address based
-      /*
-       * ===========================================
-       * Write register instructions
-       * ===========================================
-       */
-      WRSR = 0x01, //!< Write status register
-      WRCX = 0x87, //!< Write configuration register 1, 2, 3, 4
-      WRSN = 0xC2, //!< Write serial number register
-      WRAP = 0x1A, //!< Write augmented array protection register
-      WRAR = 0x71, //!< Write any register - address based
-      /*
-       * ===========================================
-       * Read memory array instructions
-       * ===========================================
-       */
-      READ = 0x03, //!< Read Memory Array - SDR
-      RDFT = 0x0B, //!< Fast Read Memory Array - SDR
-      DRFR = 0x0D, //!< Fast Read Memory Array - DDR
-      RDDO = 0x3B, //!< Read Dual Output Memory Array - SDR
-      RDQO = 0x6B, //!< Read Quad Output Memory Array - SDR
-      RDDI = 0xBB, //!< Read Dual I/O Memory Read - SDR
-      DRDI = 0xBD, //!< Read Dual I/O Memory Read - DDR
-      RDQI = 0xEB, //!< Read Quad I/O Memory Read - SDR
-      DRQI = 0xED, //!< Read Quad I/O Memory Read - DDR
-      /*
-       * ===========================================
-       * Write memory array instructions
-       * ===========================================
-       */
-      WRTE = 0x02, //!< Write Memory Array - SDR
-      WRFT = 0xDA, //!< Fast Write Memory Array - SDR
-      DRFW = 0xDE, //!< Fast Write Memory Array - DDR
-      WDUI = 0xA2, //!< Write Dual Input Memory Array - SDR
-      WQDI = 0x32, //!< Write Quad Input Memory Array - SDR
-      DWQI = 0x31, //!< Write Quad Input Memory Array - DDR
-      WDIO = 0xA1, //!< Write Dual I/O Memory Array - SDR
-      WQIO = 0xD2, //!< Write Quad I/O Memory Array - SDR
-      DWQO = 0xD1, //!< Write Quad I/O Memory Array - DDR
-      /*
-       * ===========================================
-       * Augmented storage array instructions
-       * ===========================================
-       */
-      RDAS = 0x4B, //!< Read Augmented Storage Array - SDR
-      WRAS = 0x42  //!< Write Augmented Storage Array - SDR
-    };
+  /*!
+   * @brief   Reads one register by address (RDAR 65h).
+   * @details On the AS3064204 the result is only right if the driver's copy of CR2.MLATS matches the
+   *          chip, which Init() makes sure of.
+   * @param   address  Register address, e.g. Config::MRAMPart::CR1::ADDRESS
+   * @return  The register value, or nothing if Execute() refused
+   */
+  std::optional<uint8_t> ReadRegister(uint32_t address);
 
-    /*!
-     * Datasheet Table 28, limited to the instructions that run in single-lane SPI (1-0-0, 1-0-1,
-     * 1-1-1 SDR), since that's the only mode Execute() drives. Address width is in bytes. Latency
-     * is in clock cycles, between the address and the data.
-     *
-     * RDFT and RDAS take their latency from CR2.MLATS, so CR2 must be set to at least the 8 cycles
-     * stored here (Tables 22, 24). RDAR's 8-cycle latency is fixed (Table 25).
-     */
-    class Instruction {
-    public:
-      static constexpr size_t MAX_BELT_SIZE = 256;
+  /*!
+   * @brief   Writes one register by address (WREN, then WRAR 71h), waits tCS2 and reads it back.
+   * @details Bits the part requires to be 1 (CR4[2] on the AS3016204) are set automatically. Writing
+   *          CR2 also updates the driver's copy of MLATS.
+   *
+   *          The chip doesn't report blocked writes. A write blocked by CR1.MAPLK, or by SR.WPEN with
+   *          the WP# pin low, just doesn't happen, and shows up here as Result::WriteNotVerified.
+   * @param   address      Register address, e.g. Config::MRAMPart::CR1::ADDRESS
+   * @param   value        Value to write
+   * @param   verify_mask  Bits that must read back as written. Leave read-only bits out
+   * @return  Result::Ok, Result::WriteNotVerified or Result::NotSPI
+   */
+  Result WriteRegister(uint32_t address, uint8_t value, uint8_t verify_mask = 0xFF);
 
-      // Control instructions
-      static const Instruction NoOperation;         //<!
-      static const Instruction WriteEnable;         //<!
-      static const Instruction WriteDisable;        //<!
-      static const Instruction EnterDeepPowerDown;  //<!
-      static const Instruction EnterHibernate;      //<!
-      static const Instruction SoftwareResetEnable; //<!
-      static const Instruction SoftwareReset;       //<!
-      static const Instruction ExitDeepPowerDown;   //<!
+  /*!
+   * @brief   Reads from the memory array (READ 03h), split into as many instructions as needed.
+   * @details READ has no latency cycles, so it works whatever CR2.MLATS is set to. Its 50 MHz limit
+   *          is far above the direct-mode clock.
+   * @param   address  First byte to read
+   * @param   dest     Receives the data. Its size is the read length
+   * @return  Result::Ok, Result::OutOfRange (nothing is read) or Result::NotSPI
+   */
+  Result Read(uint32_t address, std::span<uint8_t> dest);
 
-      // Read register instructions
-      static const Instruction ReadStatusRegister;                   //<!
-      static const Instruction ReadConfigurationRegister1;           //<!
-      static const Instruction ReadConfigurationRegister2;           //<!
-      static const Instruction ReadConfigurationRegister3;           //<!
-      static const Instruction ReadConfigurationRegister4;           //<!
-      static const Instruction ReadConfigurationRegisters;           //<!
-      static const Instruction ReadDeviceID;                         //<!
-      static const Instruction ReadUniqueID;                         //<!
-      static const Instruction ReadSerialNumberRegister;             //<!
-      static const Instruction ReadAugmentedArrayProtectionRegister; //<!
-      static const Instruction ReadAnyRegister;                      //<!
+  /*!
+   * @brief   Writes to the memory array (WREN, then WRTE 02h), split into as many instructions as
+   *          needed. Every chunk gets its own WREN, which works in every CR4/CR1 WRENS mode.
+   * @details The data is **not** read back. A write into a block-protected range (SR.TBSEL/BPSEL) is
+   *          silently ignored by the chip. Read() the range back if it matters.
+   * @param   address  First byte to write
+   * @param   src      Data to write. Its size is the write length
+   * @return  Result::Ok, Result::OutOfRange (nothing is written) or Result::NotSPI
+   */
+  Result Write(uint32_t address, std::span<const uint8_t> src);
 
-      // Write register instructions
-      static const Instruction WriteStatusRegister;                   //<!
-      static const Instruction WriteConfigurationRegisters;           //<!
-      static const Instruction WriteSerialNumberRegister;             //<!
-      static const Instruction WriteAugmentedArrayProtectionRegister; //<!
-      static const Instruction WriteAnyRegister;                      //<!
-
-      // Read memory array instructions
-      static const Instruction ReadMemoryArray;     //<!
-      static const Instruction FastReadMemoryArray; //<! Needs CR2.MLATS >= 8
-
-      // Write memory array instructions
-      static const Instruction WriteMemoryArray;     //<!
-      static const Instruction FastWriteMemoryArray; //<!
-
-      // Augmented storage array instructions
-      static const Instruction ReadAugmentedStorageArray;  //<!
-      static const Instruction WriteAugmentedStorageArray; //<!
-
-    private:
-      Opcode m_opcode;           //!< Command byte, always sent first
-      size_t m_address_width;    //!< Address bytes after the opcode, MSB first. 0 = no address, 3 = 24-bit
-      size_t m_latency_cycles;   //!< Clock cycles between the address and the data. 8 cycles = 1 dummy byte in 1-1-1
-      bool m_needs_write_enable; //!< WREN (06h) must go out in its own CS# cycle first. Array writes depend on CR4.WRENS
-
-      friend bool Execute(const Instruction &instr, uintptr_t addr, std::span<const uint8_t> tx_data, std::span<uint8_t> rx_data);
-
-
-      constexpr Instruction(Opcode opcode, size_t addrwidth, size_t latency_cycles, bool needs_write_enable = false)
-          : m_opcode(opcode), m_address_width(addrwidth), m_latency_cycles(latency_cycles), m_needs_write_enable(needs_write_enable) {}
-    };
-
-#pragma region instructions
-    // clang-format off
-    // Control instructions
-    constexpr Instruction Instruction::NoOperation                                { Opcode::NOOP, 0, 0 };
-    constexpr Instruction Instruction::WriteEnable                                { Opcode::WREN, 0, 0 };
-    constexpr Instruction Instruction::WriteDisable                               { Opcode::WRDI, 0, 0 };
-    constexpr Instruction Instruction::EnterDeepPowerDown                         { Opcode::DPDE, 0, 0 };
-    constexpr Instruction Instruction::EnterHibernate                             { Opcode::HBNE, 0, 0 };
-    constexpr Instruction Instruction::SoftwareResetEnable                        { Opcode::SRTE, 0, 0 };
-    constexpr Instruction Instruction::SoftwareReset                              { Opcode::SRST, 0, 0 };
-    constexpr Instruction Instruction::ExitDeepPowerDown                          { Opcode::DPDX, 0, 0 };
-
-    // Read register instructions
-    constexpr Instruction Instruction::ReadStatusRegister                         { Opcode::RDSR, 0, 0 };
-    constexpr Instruction Instruction::ReadConfigurationRegister1                 { Opcode::RDC1, 0, 0 };
-    constexpr Instruction Instruction::ReadConfigurationRegister2                 { Opcode::RDC2, 0, 0 };
-    constexpr Instruction Instruction::ReadConfigurationRegister3                 { Opcode::RDC3, 0, 0 };
-    constexpr Instruction Instruction::ReadConfigurationRegister4                 { Opcode::RDC4, 0, 0 };
-    constexpr Instruction Instruction::ReadConfigurationRegisters                 { Opcode::RDCX, 0, 0 };
-    constexpr Instruction Instruction::ReadDeviceID                               { Opcode::RDID, 0, 0 };
-    constexpr Instruction Instruction::ReadUniqueID                               { Opcode::RUID, 0, 0 };
-    constexpr Instruction Instruction::ReadSerialNumberRegister                   { Opcode::RDSN, 0, 0 };
-    constexpr Instruction Instruction::ReadAugmentedArrayProtectionRegister       { Opcode::RDAP, 0, 0 };
-    constexpr Instruction Instruction::ReadAnyRegister                            { Opcode::RDAR, 3, 8 }; //!< Fixed latency, not set by MLATS
-
-    // Write register instructions
-    constexpr Instruction Instruction::WriteStatusRegister                        { Opcode::WRSR, 0, 0, true };
-    constexpr Instruction Instruction::WriteConfigurationRegisters                { Opcode::WRCX, 0, 0, true };
-    constexpr Instruction Instruction::WriteSerialNumberRegister                  { Opcode::WRSN, 0, 0, true };
-    constexpr Instruction Instruction::WriteAugmentedArrayProtectionRegister      { Opcode::WRAP, 0, 0, true };
-    constexpr Instruction Instruction::WriteAnyRegister                           { Opcode::WRAR, 3, 0, true };
-
-    // Read memory array instructions
-    constexpr Instruction Instruction::ReadMemoryArray                            { Opcode::READ, 3, 0 };
-    constexpr Instruction Instruction::FastReadMemoryArray                        { Opcode::RDFT, 3, 8 };
-
-    // Write memory array instructions
-    constexpr Instruction Instruction::WriteMemoryArray                           { Opcode::WRTE, 3, 0, true };
-    constexpr Instruction Instruction::FastWriteMemoryArray                       { Opcode::WRFT, 3, 0, true };
-
-    // Augmented storage array instructions
-    constexpr Instruction Instruction::ReadAugmentedStorageArray                  { Opcode::RDAS, 3, 8 };
-    constexpr Instruction Instruction::WriteAugmentedStorageArray                 { Opcode::WRAS, 3, 0, true };
-
-    //clang-format on
-#pragma endregion
-
-    bool Execute(const Instruction &instr, uintptr_t addr, std::span<const uint8_t> tx_data, std::span<uint8_t> rx_data);
-
-    /*
-     * ===========================================
-     * Register bit masks
-     * ===========================================
-     * Single-bit flags are plain masks. Multi-bit fields get a _MASK, a _SHIFT, and pre-shifted
-     * values for their codes. ADDRESS is for RDAR 65h / WRAR 71h (Table 11).
-     */
-
-    /*!
-     * Status Register. Datasheet Table 12.
-     */
-    namespace SR {
-      constexpr uint32_t ADDRESS = 0x000000;
-
-      constexpr uint8_t WPEN = 1u << 7;  //!< WP# pin low write-protects SR and the CRs (Table 15)
-      constexpr uint8_t SNPEN = 1u << 6; //!< Write-protects the serial number register
-      constexpr uint8_t TBSEL = 1u << 5; //!< Block protect from the bottom (1) or top (0)
-      constexpr uint8_t WREN = 1u << 1;  //!< Write enable latch. Read-only, set by WREN 06h
-
-      // BPSEL[2:0] — portion of the array that is write-protected. Codes 1–6 protect 1/64 up to 1/2.
-      constexpr uint8_t BPSEL_SHIFT = 2;
-      constexpr uint8_t BPSEL_MASK = 0b111u << BPSEL_SHIFT;
-      constexpr uint8_t BPSEL_NONE = 0b000u << BPSEL_SHIFT;
-      constexpr uint8_t BPSEL_ALL = 0b111u << BPSEL_SHIFT;
-    } // namespace SR
-
-    /*!
-     * Configuration Register 1 — protection locks. Datasheet Table 20.
-     */
-    namespace CR1 {
-      constexpr uint32_t ADDRESS = 0x000002;
-
-      constexpr uint8_t ASPLK = 1u << 0; //!< Write protects the whole augmented storage array
-      constexpr uint8_t MAPLK = 1u << 2; //!< Locks TBSEL and BPSEL[2:0] in the status register
-    } // namespace CR1
-
-    /*!
-     * Configuration Register 2 — interface mode and memory array read latency. Datasheet Table 21.
-     */
-    namespace CR2 {
-      constexpr uint32_t ADDRESS = 0x000003;
-
-      /*!
-       * MLATS[3:0] — latency cycles (0–15) inserted before data on memory array reads.
-       * Plain READ (03h) needs none but tops out at 50MHz. Fast reads need 8–15 cycles for 1-1-1,
-       * 1-1-2, 1-2-2 and 2-2-2, and 12–15 for 1-1-4, 1-4-4 and 4-4-4. Datasheet Tables 22–24.
-       */
-      constexpr uint8_t MLATS_SHIFT = 0;
-      constexpr uint8_t MLATS_MASK = 0x0Fu << MLATS_SHIFT;
-
-      // Read-only: the bus mode only changes through the DPIE / QPIE / SPIE instructions
-      // (37h / 38h / FFh). Writing these bits does nothing.
-      constexpr uint8_t DPISL = 1u << 4; //!< Dual SPI (DPI 2-2-2) is active
-      constexpr uint8_t QPISL = 1u << 6; //!< Quad SPI (QPI 4-4-4) is active
-    } // namespace CR2
-
-    /*!
-     * Configuration Register 3 — output driver strength and read wrap. Datasheet Table 26.
-     */
-    namespace CR3 {
-      constexpr uint32_t ADDRESS = 0x000004;
-
-      /*!
-       * ODSEL[2:0] — output driver impedance. The same code gives a different impedance on 1.8V
-       * and 3.0V parts:
-       *
-       *     code  1.8V   3.0V
-       *     0     45Ω*   35Ω
-       *     1     120Ω   75Ω
-       *     2     90Ω    60Ω
-       *     3     70Ω    45Ω*
-       *     4     45Ω    35Ω
-       *     5     60Ω    40Ω
-       *     6     30Ω    20Ω
-       *     7     20Ω    15Ω      (* = factory default)
-       */
-      constexpr uint8_t ODSEL_SHIFT = 5;
-      constexpr uint8_t ODSEL_MASK = 0b111u << ODSEL_SHIFT;
-
-      constexpr uint8_t WRAPS = 1u << 4; //!< Enables read wrap within the boundary selected by WRPLS
-
-      // WRPLS[2:0] — aligned boundary that reads wrap within. Codes 101–111 are reserved.
-      constexpr uint8_t WRPLS_SHIFT = 0;
-      constexpr uint8_t WRPLS_MASK = 0b111u << WRPLS_SHIFT;
-      constexpr uint8_t WRPLS_16 = 0b000u << WRPLS_SHIFT;
-      constexpr uint8_t WRPLS_32 = 0b001u << WRPLS_SHIFT;
-      constexpr uint8_t WRPLS_64 = 0b010u << WRPLS_SHIFT;
-      constexpr uint8_t WRPLS_128 = 0b011u << WRPLS_SHIFT;
-      constexpr uint8_t WRPLS_256 = 0b100u << WRPLS_SHIFT;
-    } // namespace CR3
-
-    /*!
-     * Configuration Register 4 — whether memory array and augmented storage writes need WREN
-     * first. Register writes always need WREN regardless. Datasheet Table 27.
-     */
-    namespace CR4 {
-      constexpr uint32_t ADDRESS = 0x000005;
-
-      /// Reserved, but must always be written as 1. OR it into every value written to CR4.
-      constexpr uint8_t MUST_BE_ONE = 1u << 2;
-
-      // WRENS[1:0]. Code 11 is illegal.
-      constexpr uint8_t WRENS_SHIFT = 0;
-      constexpr uint8_t WRENS_MASK = 0b11u << WRENS_SHIFT;
-      constexpr uint8_t WRENS_NORMAL = 0b00u << WRENS_SHIFT;       //!< WREN before every array write; cleared when CS# goes high
-      constexpr uint8_t WRENS_SRAM = 0b01u << WRENS_SHIFT;         //!< WREN not needed (ignored) for array writes. Factory default
-      constexpr uint8_t WRENS_BACK_TO_BACK = 0b10u << WRENS_SHIFT; //!< WREN before the first array write only; stays set until WRDI
-    } // namespace CR4
-
-
-    uint8_t ReadSR();
-    uint8_t ReadCR1();
-    uint8_t ReadCR2();
-    uint8_t ReadCR3();
-    uint8_t ReadCR4();
-
-
-
-  } // namespace MRAM
-
-
-} // namespace OwlSat
+} // namespace OwlSat::MRAM
