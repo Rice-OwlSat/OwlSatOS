@@ -41,6 +41,46 @@ namespace OwlSat::Config {
   inline constexpr size_t MRAM_MAX_BELT_SIZE = 256;
 
   /*!
+   * Whether the flight design executes in place (XIP) from the MRAM.
+   *
+   * - true: the image runs from the MRAM (the SDK's default binary type). Every driver
+   *   transaction takes the chip out of XIP, runs its CS# cycles from SRAM with interrupts off
+   *   (flash_safe_execute), then restores XIP the way the bootrom set it up.
+   * - false: the image runs from SRAM (`pico_set_binary_type(<target> copy_to_ram)`) and the MRAM
+   *   is only storage. The driver drives the QMI directly and never touches XIP.
+   *
+   * The build checks this against the binary type below. SRAM-only bench binaries (no_flash)
+   * always drive the QMI directly, whatever this says.
+   */
+  inline constexpr bool MRAM_EXECUTE_IN_PLACE = true;
+
+#if !PICO_NO_FLASH && !PICO_COPY_TO_RAM
+  static_assert(MRAM_EXECUTE_IN_PLACE, "This binary executes from the MRAM, so the driver must leave and restore XIP around every "
+                                       "transaction. Set MRAM_EXECUTE_IN_PLACE, or build the target as copy_to_ram.");
+#endif
+
+  /// Whether the driver wraps its transactions in an XIP exit / restore. Derived, don't edit
+#if PICO_NO_FLASH
+  inline constexpr bool MRAM_USES_XIP_SESSIONS = false;
+#else
+  inline constexpr bool MRAM_USES_XIP_SESSIONS = MRAM_EXECUTE_IN_PLACE;
+#endif
+
+  /*!
+   * QMI direct-mode SCK = clk_sys / this, for every driver transaction. 30 gives 5 MHz at
+   * 150 MHz: the divisor the SDK's own boot2 uses for direct-mode commands, and a tenth of the
+   * slowest instruction limit the driver uses (READ 03h at 50 MHz). DIRECT_CSR.CLKDIV is 8 bits.
+   */
+  inline constexpr uint32_t MRAM_DIRECT_CLKDIV = 30;
+  static_assert(MRAM_DIRECT_CLKDIV >= 1 && MRAM_DIRECT_CLKDIV <= 255, "QMI DIRECT_CSR.CLKDIV is 8 bits, 1..255");
+
+  /*!
+   * How long flash_safe_execute() may wait to get the other core and interrupts out of the way
+   * before a transaction. Only used when MRAM_USES_XIP_SESSIONS.
+   */
+  inline constexpr uint32_t MRAM_SAFE_EXECUTE_TIMEOUT_MS = 10;
+
+  /*!
    * Register configuration and timings for one part. Specialised for each supported part below.
    *
    * @tparam Part  MRAM::AS3016204 or MRAM::AS3064204
@@ -194,13 +234,10 @@ namespace OwlSat::Config {
   static_assert(CheckMRAMSettings<MRAM::AS3064204>(), "A flight register value is missing a must-be-one bit");
 
   /*!
-   * Parameters for the MRAM_Test_Read and MRAM_Test_Write bench binaries (mram-test/). Not used by
-   * the flight image.
+   * Parameters for the MRAM_Test_Read, MRAM_Test_Write and MRAM_Test_XIP bench binaries
+   * (mram-test/). Not used by the flight image.
    */
   namespace MRAMTest {
-    /// Direct-mode SCK = clk_sys / this, so 5 MHz at 150 MHz. QMI DIRECT_CSR.CLKDIV is 8 bits, 1..255
-    inline constexpr uint32_t DIRECT_CLKDIV = 30;
-
     inline constexpr uint32_t STARTUP_DELAY_MS = 2000; //!< Pause before the first line, so a serial reader can attach
     inline constexpr uint32_t SUMMARY_PERIOD_MS = 5000; //!< How often the summary repeats once the tests are done
 
@@ -210,6 +247,9 @@ namespace OwlSat::Config {
     /// Write test start: inside the unprotected upper 1 MiB of the test board's AS3016204
     inline constexpr uint32_t WRITE_ADDRESS = 0x1FF000;
     inline constexpr size_t WRITE_LENGTH = 300; //!< Write test length. Longer than one transfer, so it crosses a chunk boundary
+
+    /// Stack for MRAM_Test_XIP's test task, in words. Holds three write-length buffers, a transfer belt and printf
+    inline constexpr uint32_t TEST_TASK_STACK_WORDS = 2048;
   } // namespace MRAMTest
 
 } // namespace OwlSat::Config

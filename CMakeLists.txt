@@ -75,9 +75,14 @@ target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
         hardware_pwm
         hardware_flash
+        pico_flash
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
 )
+
+# The MRAM driver suspends XIP through flash_safe_execute(). FreeRTOS runs on core 0 only and
+# core 1 is never started, so pico_flash only has to mask interrupts.
+target_compile_definitions(OwlSatOS PRIVATE PICO_FLASH_ASSUME_CORE1_SAFE=1)
 
 pico_enable_stdio_usb(OwlSatOS 1)
 pico_enable_stdio_uart(OwlSatOS 0)
@@ -130,4 +135,17 @@ foreach(MRAM_TEST_VARIANT IN ITEMS Read Write)
     pico_enable_stdio_uart(${MRAM_TEST_TARGET} 1)
     pico_add_extra_outputs(${MRAM_TEST_TARGET})
 endforeach()
+
+# The same suite from a FreeRTOS task in an image that executes from the MRAM, through the driver's
+# XIP sessions. Flashing it REPLACES the image in the bottom of the MRAM (e.g. blinky).
+add_executable(MRAM_Test_XIP mram-test/src/mram_api_test.cpp src/mram.cpp src/mram_transactions.cpp)
+target_compile_definitions(MRAM_Test_XIP PRIVATE MRAM_TEST_WRITES=1 MRAM_TEST_XIP=1 PICO_FLASH_ASSUME_CORE1_SAFE=1)
+target_link_libraries(MRAM_Test_XIP pico_stdlib pico_bootrom hardware_flash pico_flash FreeRTOS-Kernel-Core FreeRTOS-Kernel-Heap4)
+target_include_directories(MRAM_Test_XIP PRIVATE
+        ${FREERTOS_KERNEL_PATH}/include
+        ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure
+        include/)
+pico_enable_stdio_usb(MRAM_Test_XIP 0)
+pico_enable_stdio_uart(MRAM_Test_XIP 1)
+pico_add_extra_outputs(MRAM_Test_XIP)
 

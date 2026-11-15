@@ -2,18 +2,24 @@
 
     @file      mram_api_test.cpp
     @brief     Bench test for the MRAM driver API (mram.h) on the AS3016204 test board.
-    @details   SRAM-only (no_flash) program that prints its results over UART0 (GP0 TX / GP1 RX,
-               115200 8N1) to the debug probe. Built twice:
-               - MRAM_Test_Read  (MRAM_TEST_WRITES=0): only sends read instructions. Changes nothing.
-               - MRAM_Test_Write (MRAM_TEST_WRITES=1): the read tests, then a same-value register
-                 write and an array write in the unprotected upper 1 MiB, which is restored after.
+    @details   Prints its results over UART0 (GP0 TX / GP1 RX, 115200 8N1) to the debug probe.
+               Built three times:
+               - MRAM_Test_Read  (no_flash, MRAM_TEST_WRITES=0): only sends read instructions.
+                 Changes nothing.
+               - MRAM_Test_Write (no_flash, MRAM_TEST_WRITES=1): the read tests, then a same-value
+                 register write and an array write in the upper 1 MiB, which is restored after.
+               - MRAM_Test_XIP   (executes from the MRAM, MRAM_TEST_WRITES=1, MRAM_TEST_XIP=1): the
+                 write suite from a FreeRTOS task, through the XIP session transport, while a second
+                 task keeps the scheduler switching. Adds reads of the written data through the XIP
+                 window, which check the cache flush. This one replaces whatever image is in the
+                 bottom of the MRAM.
 
                Every step prints PASS, FAIL or INFO, then a summary line that repeats every
                Config::MRAMTest::SUMMARY_PERIOD_MS. GP25 lights when every check passed, GP24 when
                any failed.
 
-               Never calls rom_flash_exit_xip() or anything that changes the chip's interface mode.
-               The bottom half of the array (blinky, block-protected) is only ever read.
+               Never sends anything that changes the chip's interface mode. Only the write area in
+               the upper half of the array is ever written, and it is restored.
 
     @author    Viola Case
     @date      15.11.2026
@@ -27,16 +33,23 @@
 #include <span>
 #include <type_traits>
 
-#include <hardware/address_mapped.h>
 #include <hardware/clocks.h>
-#include <hardware/structs/qmi.h>
-#include <pico/bootrom.h>
 #include <pico/stdlib.h>
 
 #include <OwlSat/mram.h>
 
 #ifndef MRAM_TEST_WRITES
-#error "Build through the MRAM_Test_Read or MRAM_Test_Write target, which define MRAM_TEST_WRITES"
+#error "Build through an MRAM_Test_* target, which define MRAM_TEST_WRITES"
+#endif
+#ifndef MRAM_TEST_XIP
+#define MRAM_TEST_XIP 0
+#endif
+
+#if MRAM_TEST_XIP
+#include <hardware/regs/addressmap.h>
+
+#include "FreeRTOS.h"
+#include "task.h"
 #endif
 
 
@@ -48,7 +61,7 @@ namespace {
   using Settings = OwlSat::Config::MRAMSettings<Part>;
 
   static_assert(std::is_same_v<OwlSat::Config::MRAMPart, Part>, "The bench tests are written for the AS3016204 test board");
-  static_assert(Test::DIRECT_CLKDIV >= 1 && Test::DIRECT_CLKDIV <= 255, "QMI DIRECT_CSR.CLKDIV is 8 bits, 1..255");
+  static_assert(MRAM_TEST_XIP == OwlSat::Config::MRAM_USES_XIP_SESSIONS, "MRAM_Test_XIP must use XIP sessions, the others must not");
   static_assert(Test::WRITE_ADDRESS >= Part::CAPACITY / 2 && Test::WRITE_ADDRESS + Test::WRITE_LENGTH <= Part::CAPACITY,
                 "The write test must stay inside the unprotected upper half of the array");
 
@@ -97,16 +110,6 @@ namespace {
    * @return  False if Execute() refused
    */
   bool Raw(const Instruction &instr, std::span<uint8_t> rx) { return Execute(instr, 0, {}, rx); }
-
-  /*!
-   * @brief   Connects the QMI to the QSPI pads and sets the direct-mode clock. Clocks nothing out.
-   *          Leaves direct mode off and CS0# high.
-   */
-  void PrepareBus() {
-    rom_connect_internal_flash();
-    hw_clear_bits(&qmi_hw->direct_csr, QMI_DIRECT_CSR_EN_BITS | QMI_DIRECT_CSR_ASSERT_CS0N_BITS);
-    hw_write_masked(&qmi_hw->direct_csr, Test::DIRECT_CLKDIV << QMI_DIRECT_CSR_CLKDIV_LSB, QMI_DIRECT_CSR_CLKDIV_BITS);
-  }
 
   /*!
    * @brief   Prints a register table against the chip, marking which registers differ.
@@ -261,6 +264,18 @@ namespace {
     for (size_t i = 0; i < pattern.size(); ++i) pattern[i] = static_cast<uint8_t>(~original[i]);
     Check(Write(Test::WRITE_ADDRESS, pattern) == Result::Ok, "Write() the pattern (original bytes inverted)");
     Check(Read(Test::WRITE_ADDRESS, readback) == Result::Ok && readback == pattern, "Read() returns the pattern");
+#if MRAM_TEST_XIP
+    // The session flushed the XIP cache, so the cached window must already show the new data
+    const volatile uint8_t *cached = reinterpret_cast<const volatile uint8_t *>(XIP_BASE + Test::WRITE_ADDRESS);
+    const volatile uint8_t *uncached = reinterpret_cast<const volatile uint8_t *>(XIP_NOCACHE_NOALLOC_BASE + Test::WRITE_ADDRESS);
+    bool cached_ok = true, uncached_ok = true;
+    for (size_t i = 0; i < pattern.size(); ++i) {
+      cached_ok &= cached[i] == pattern[i];
+      uncached_ok &= uncached[i] == pattern[i];
+    }
+    Check(cached_ok, "The cached XIP window shows the pattern (the session flushed the cache)");
+    Check(uncached_ok, "The uncached XIP window shows the pattern");
+#endif
 
     Result restore = Write(Test::WRITE_ADDRESS, original);
     bool restored = restore == Result::Ok && Read(Test::WRITE_ADDRESS, readback) == Result::Ok && readback == original;
@@ -280,37 +295,112 @@ namespace {
     gpio_put(LED_FAIL, g_failed != 0);
   }
 
+  /// Prints the banner and runs every test this build includes
+  void RunTests() {
+    const char *variant = MRAM_TEST_XIP ? "MRAM_Test_XIP, from a FreeRTOS task" : MRAM_TEST_WRITES ? "MRAM_Test_Write" : "MRAM_Test_Read, read-only";
+    uint32_t sys_hz = clock_get_hz(clk_sys);
+    printf("\n=== MRAM API bench test (%s) ===\n", variant);
+    printf("Part %s, %u KiB. Transport: %s. Direct-mode SCK = %u kHz / %u = %u kHz\n", Part::NAME, static_cast<unsigned>(Part::CAPACITY / 1024),
+           OwlSat::Config::MRAM_USES_XIP_SESSIONS ? "XIP sessions" : "direct", static_cast<unsigned>(sys_hz / 1000),
+           static_cast<unsigned>(OwlSat::Config::MRAM_DIRECT_CLKDIV), static_cast<unsigned>(sys_hz / OwlSat::Config::MRAM_DIRECT_CLKDIV / 1000));
+
+    TestID();
+    TestRegisterReads();
+    TestInit();
+    TestArrayRead();
+    TestRange();
+#if MRAM_TEST_WRITES
+    TestRegisterWrite();
+    TestArrayWrite();
+#endif
+  }
+
+  /// Sets up the LEDs and stdio, then waits for a serial reader to attach
+  void StartBoard() {
+    for (uint pin : { LED_PASS, LED_FAIL }) {
+      gpio_init(pin);
+      gpio_set_dir(pin, GPIO_OUT);
+    }
+    stdio_init_all();
+    sleep_ms(Test::STARTUP_DELAY_MS);
+  }
+
+#if MRAM_TEST_XIP
+  /*
+   * ===========================================
+   * FreeRTOS harness
+   * ===========================================
+   */
+
+  volatile uint32_t g_busy_wakeups = 0; //!< Times the busy task has run
+
+  /*!
+   * @brief   Wakes every tick, so the scheduler keeps switching tasks and the tick interrupt keeps
+   *          firing while the tests take the MRAM away from XIP.
+   * @param   params  Unused
+   */
+  void BusyTask(void *params) {
+    (void)params;
+    for (;;) {
+      g_busy_wakeups = g_busy_wakeups + 1;
+      vTaskDelay(1);
+    }
+  }
+
+  /*!
+   * @brief   Runs the tests, checks the scheduler kept going, then repeats the summary.
+   * @param   params  Unused
+   */
+  void TestTask(void *params) {
+    (void)params;
+    TickType_t ticks_before = xTaskGetTickCount();
+    uint32_t wakeups_before = g_busy_wakeups;
+    RunTests();
+    TickType_t ticks = xTaskGetTickCount() - ticks_before;
+    uint32_t wakeups = g_busy_wakeups - wakeups_before;
+
+    printf("\n--- 8. Scheduler ---\n");
+    printf("Ticks during the tests: %u, busy task wake-ups: %u\n", static_cast<unsigned>(ticks), static_cast<unsigned>(wakeups));
+    Check(ticks > 0 && wakeups > 0, "The tick and the other task kept running around the XIP sessions");
+
+    printf("\n");
+    for (;;) {
+      Summary();
+      vTaskDelay(pdMS_TO_TICKS(Test::SUMMARY_PERIOD_MS));
+    }
+  }
+#endif
+
 } // namespace
 
 
+#if MRAM_TEST_XIP
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t task, char *name) {
+  (void)task;
+  printf("!!! stack overflow in task %s\n", name);
+  for (;;) {}
+}
+
+extern "C" void vApplicationMallocFailedHook() {
+  printf("!!! FreeRTOS heap exhausted\n");
+  for (;;) {}
+}
+
 int main() {
-  for (uint pin : { LED_PASS, LED_FAIL }) {
-    gpio_init(pin);
-    gpio_set_dir(pin, GPIO_OUT);
-  }
-  stdio_init_all();
-  sleep_ms(Test::STARTUP_DELAY_MS);
-
-  uint32_t sys_hz = clock_get_hz(clk_sys);
-  printf("\n=== MRAM API bench test (%s) ===\n", MRAM_TEST_WRITES ? "MRAM_Test_Write" : "MRAM_Test_Read, read-only");
-  printf("Part %s, %u KiB. Direct-mode SCK = %u kHz / %u = %u kHz\n", Part::NAME, static_cast<unsigned>(Part::CAPACITY / 1024),
-         static_cast<unsigned>(sys_hz / 1000), static_cast<unsigned>(Test::DIRECT_CLKDIV),
-         static_cast<unsigned>(sys_hz / Test::DIRECT_CLKDIV / 1000));
-
-  PrepareBus();
-  TestID();
-  TestRegisterReads();
-  TestInit();
-  TestArrayRead();
-  TestRange();
-#if MRAM_TEST_WRITES
-  TestRegisterWrite();
-  TestArrayWrite();
-#endif
-
+  StartBoard();
+  xTaskCreate(TestTask, "mram_test", Test::TEST_TASK_STACK_WORDS, nullptr, 1, nullptr);
+  xTaskCreate(BusyTask, "busy", configMINIMAL_STACK_SIZE, nullptr, 1, nullptr);
+  vTaskStartScheduler();
+  for (;;) {}
+}
+#else
+int main() {
+  StartBoard();
+  RunTests();
   printf("\n");
   for (;;) {
     Summary();
     sleep_ms(Test::SUMMARY_PERIOD_MS);
   }
 }
+#endif
