@@ -18,6 +18,7 @@
 **/
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
@@ -99,9 +100,9 @@ namespace OwlSat::Config {
   //
   //   4  unused — reserved for a future fault handler
   //   3  FreeRTOS timer service (configTIMER_TASK_PRIORITY)
-  //   2  watchdog, transmit
+  //   2  watchdog, transmit, antenna deployment
   //   1  sensor, link, blink
-  //   0  idle
+  //   0  idle, and the antenna deployment task once the antennae are deployed
   //
   // The watchdog does NOT run at the top priority. A kicker that outranks everything proves only
   // that the scheduler still switches to the highest-priority ready task; running it alongside the
@@ -114,6 +115,9 @@ namespace OwlSat::Config {
   inline constexpr uint32_t PRIO_SENSOR   = 1;
   inline constexpr uint32_t PRIO_LINK     = 1;
   inline constexpr uint32_t PRIO_BLINK    = 1;
+
+  /// Starting priority only. The task drops itself to 0 once the deployed latch is set.
+  inline constexpr uint32_t PRIO_ANTENNA  = 2;
 
 
   // ---------------------------------------------------------------------------
@@ -128,6 +132,7 @@ namespace OwlSat::Config {
   inline constexpr uint16_t STACK_TRANSMIT = 1024;
   inline constexpr uint16_t STACK_WATCHDOG = 512;
   inline constexpr uint16_t STACK_BLINK    = 256;
+  inline constexpr uint16_t STACK_ANTENNA  = 1024; ///< The MRAM transfer belt (256 B) lives on this stack.
 
 
   // ---------------------------------------------------------------------------
@@ -154,5 +159,47 @@ namespace OwlSat::Config {
 
   /// Frames handed to the radio in a single transmit pass, before yielding.
   inline constexpr uint32_t PACKET_BURST_LIMIT = 8;
+
+
+  // ---------------------------------------------------------------------------
+  // Antenna deployment
+  //
+  // The antenna-deployed latch is one 32-bit word, stored as several independent copies in the
+  // MRAM. A copy counts as "deployed" if it is within ANTENNA_LATCH_MAX_BIT_ERRORS bits of
+  // ANTENNA_LATCH_DEPLOYED, and the latch is set if a majority of copies count. So:
+  //   - a set latch survives any single bad bit — in fact up to MAX_BIT_ERRORS bad bits in every
+  //     copy, or one copy destroyed outright;
+  //   - a clear latch cannot be read as set by a single bad bit, because erased or random MRAM
+  //     sits ~16 bits away from the deployed word and a majority of copies would have to drift.
+  // The second direction matters more: a falsely-set latch means the antennae never deploy, while
+  // a falsely-clear one only re-fires a burn wire that has already done its job.
+  //
+  // Placement is provisional until the storage layer exists. The copies sit in the top half of the
+  // AS3016204, which the README reserves for storage, well clear of the running image at the
+  // bottom and of the bench write test at 0x1FF000, and in separate 256 KiB chunks so that one
+  // localised fault cannot take out a majority. The storage layer must not hand these words out.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * How long BURN_0 is held high [ms].
+   *
+   * TBC — depends on the burn wire, its switch and VBATT. 5 s is a typical nichrome figure and a
+   * placeholder only.
+   */
+  inline constexpr uint32_t ANTENNA_BURN_MS = 5000;
+
+  /// MRAM byte address of each copy of the deployed latch. Odd count, at least three.
+  inline constexpr std::array<uint32_t, 3> ANTENNA_LATCH_ADDRESSES = { 0x100000, 0x140000, 0x180000 };
+
+  /**
+   * The word a copy holds once the antennae are deployed.
+   *
+   * 16 bits set and 16 clear, so it is as far as a 32-bit word can be from both 0x00000000 and
+   * 0xFFFFFFFF, the two most likely contents of MRAM nobody has written.
+   */
+  inline constexpr uint32_t ANTENNA_LATCH_DEPLOYED = 0xA5C396E1;
+
+  /// Bit errors a copy may carry and still count as deployed. Must be well under half of 16.
+  inline constexpr unsigned ANTENNA_LATCH_MAX_BIT_ERRORS = 4;
 
 } // namespace OwlSat::Config

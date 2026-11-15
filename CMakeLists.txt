@@ -96,6 +96,24 @@ target_include_directories(OwlSatOS PRIVATE
 
 pico_add_extra_outputs(OwlSatOS)
 
+# Bench copy of the flight image with stdio on UART0 (GP0 TX / GP1 RX, 115200) instead of USB, for the
+# debug probe. USB CDC re-enumerates on every power cycle and loses the boot output; the probe's UART
+# does not, which is what power-cycle tests (the antenna-deployed latch) need. Same sources and
+# libraries as OwlSatOS. Flashing it REPLACES the image in the bottom of the MRAM.
+add_executable(OwlSatOS_UART ${OWLSAT_SOURCES})
+pico_set_program_name(OwlSatOS_UART "OwlSatOS_UART")
+target_link_libraries(OwlSatOS_UART pico_stdlib hardware_pwm hardware_flash pico_flash FreeRTOS-Kernel-Core FreeRTOS-Kernel-Heap4)
+target_compile_definitions(OwlSatOS_UART PRIVATE PICO_FLASH_ASSUME_CORE1_SAFE=1)
+target_include_directories(OwlSatOS_UART PRIVATE
+        ./
+        ${CMAKE_CURRENT_LIST_DIR}
+        ${FREERTOS_KERNEL_PATH}/include
+        ${FREERTOS_KERNEL_PATH}/portable/ThirdParty/Community-Supported-Ports/GCC/RP2350_ARM_NTZ/non_secure
+        include/)
+pico_enable_stdio_usb(OwlSatOS_UART 0)
+pico_enable_stdio_uart(OwlSatOS_UART 1)
+pico_add_extra_outputs(OwlSatOS_UART)
+
 # Bench-only MRAM interface-mode probe (docs/mram_mode_probe.md). Loaded into SRAM over BOOTSEL and
 # never written to the MRAM. Shares the MRAM driver with the flight image.
 file(GLOB MRAM_Probe_SOURCES CONFIGURE_DEPENDS mram-probe/src/*.cpp mram-probe/src/*.c)

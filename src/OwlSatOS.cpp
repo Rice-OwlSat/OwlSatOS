@@ -39,6 +39,7 @@
  *   - @c link      — asks the radio whether it will accept frames        (link_task.cpp)
  *   - @c tx        — packs pending records into frames and sends them    (transmit_task.cpp)
  *   - @c wdt       — pulses WDT_WDI while the three above keep checking in (watchdog_task.cpp)
+ *   - @c antenna   — fires the burn wire once, ever, and latches it in MRAM (antenna_deploy_task.cpp)
  *
  * The hardware drivers these tasks depend on live on other branches and are stubbed out in
  * hal_stub.cpp, so this build runs the full task graph against absent hardware: it samples
@@ -156,6 +157,7 @@ int main() {
   ok = Spawn(OwlSat::TransmitTask, "tx", OwlSat::Config::STACK_TRANSMIT, OwlSat::Config::PRIO_TRANSMIT) && ok;
   ok = Spawn(OwlSat::Watchdog::WatchdogTask, "wdt", OwlSat::Config::STACK_WATCHDOG, OwlSat::Config::PRIO_WATCHDOG)
        && ok;
+  ok = Spawn(OwlSat::AntennaDeployTask, "antenna", OwlSat::Config::STACK_ANTENNA, OwlSat::Config::PRIO_ANTENNA) && ok;
 
   if (!ok) {
     HaltForWatchdog("one or more flight tasks could not be created");

@@ -89,4 +89,22 @@ namespace OwlSat {
    */
   void MRAMWatchdogTask(void *params);
 
+  /**
+   * @brief Fires the antenna burn wire once, ever, and records that it has.
+   *
+   * Reads the antenna-deployed latch from the MRAM (majority vote over redundant copies, see the
+   * antenna section of config.h). If it is set, drops itself to priority 0 and parks. Otherwise it
+   * drives BURN_0 high for Config::ANTENNA_BURN_MS, drives it low, waits for confirmation that the
+   * antennae are out (not written yet — see the TODO in antenna_deploy_task.cpp), sets the latch,
+   * and parks the same way.
+   *
+   * If the MRAM cannot be brought up, the burn still happens: the latch cannot be read or set, so
+   * the wire fires again on every boot, which costs battery. Never deploying would cost the radio.
+   *
+   * Not a watchdog client — it spends almost its whole life suspended.
+   *
+   * @param params Unused (pass nullptr).
+   */
+  void AntennaDeployTask(void *params);
+
 } // namespace OwlSat
