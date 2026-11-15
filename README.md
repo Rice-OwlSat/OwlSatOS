@@ -61,6 +61,19 @@ Hold BOOTSEL, plug the Pico 2 in, and copy `build/<preset>/OwlSatOS.uf2` onto th
 appears. Console output is USB CDC — `pico_enable_stdio_usb` is on and `pico_enable_stdio_uart` is
 off — so the board enumerates as a serial port and the boot banner arrives there, not on UART0.
 
+### Rebooting without the BOOTSEL button (Debug builds)
+Every Debug target carries the SDK's USB reset interface (`cmake/debug_usb_reset.cmake`; call
+`owlsat_debug_usb_reset(<target>)` after a new target's stdio lines). While a Debug build is running:
+- `tools/reboot.ps1` (or `tools/reboot.sh`) puts the board into BOOTSEL and waits for it
+- `tools/reboot.ps1 -App` restarts the application, from BOOTSEL or from a running app
+- `tools/reboot.ps1 -Load build/pico2-debug/<target>.uf2` gets into BOOTSEL, loads the image and runs it
+
+Where stdout goes is unchanged: a target that prints over USB still does, and one that prints on UART0
+for the debug probe keeps stdout and stdin on UART only, with USB up for the reset interface alone.
+A board halted with interrupts off (`HaltForWatchdog`, a fatal hook) does not answer and still needs
+the button. TinyUSB is compiled with `CFG_TUSB_DEBUG=1` in Debug, so a stray
+`usbd_control_xfer_cb ... ASSERT FAILED` line during enumeration is the USB stack's own debug output.
+
 ## Documentation
 - This repo uses Doxygen as its documentation generator. From the project root, run
   `doxygen ./owlsatos.Doxyfile` and it generates HTML and LaTeX under `docs/` (both gitignored).
