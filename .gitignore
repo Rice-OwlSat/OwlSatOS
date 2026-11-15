@@ -9,3 +9,4 @@ docs/latex/
 documents/
 
 !documents/documents_info.md
+*.pdf

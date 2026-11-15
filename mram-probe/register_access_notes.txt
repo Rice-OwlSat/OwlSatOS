@@ -1,0 +1,193 @@
+/*
+ * ============================================================================================
+ *  HOW TO TALK TO THE AS3016204's REGISTERS AND AUGMENTED STORAGE FROM HERE — NO XIP
+ * ============================================================================================
+ *
+ *  0. THE TRANSPORT: DRIVE THE QMI YOURSELF
+ *  ----------------------------------------
+ *    Don't use flash_do_cmd() (hardware/flash.h) for this. In a no_flash build it calls the
+ *    bootrom's flash_enter_cmd_xip() at the end of EVERY command, so the chip is dumped back into
+ *    03h-read XIP after each transaction. That's the thing you're trying to avoid. You can drop
+ *    the #include <hardware/flash.h> and you don't need hardware_flash in CMake.
+ *
+ *    Instead, write one tiny helper around the RP2350's QMI "direct mode". It's basically SPI
+ *    with the chip select under your control. Everything you need is in the SDK already:
+ *
+ *      <pico/bootrom.h>              (pico_bootrom — already linked)
+ *          rom_connect_internal_flash()   Muxes the QSPI pads to the QMI so it actually drives
+ *                                         the pins. Call ONCE at startup.
+ *          rom_flash_exit_xip()           Kicks the chip out of any continuous-read / XIP state
+ *                                         the bootrom may have left it in. Call ONCE at
+ *                                         startup, right after the above. It exits XIP; it
+ *                                         does not enter it. After these two calls, never call
+ *                                         rom_flash_enter_cmd_xip() or flash_start_xip().
+ *
+ *      <hardware/structs/qmi.h>      qmi_hw->direct_csr, ->direct_tx, ->direct_rx
+ *      <hardware/address_mapped.h>   hw_set_bits(), hw_clear_bits()
+ *
+ *    You already have the helper: mram_xfer() from the other version of the probe (the
+ *    "One raw SPI transaction through the QMI's direct mode" one). Paste it in as-is. It:
+ *      - asserts CS0# and THEN enables direct mode, and on the way out disables direct mode
+ *        and THEN releases CS0#. Same order as the SDK, fine.
+ *      - keeps TX and RX pipelined in one loop instead of lockstep, which is also fine. The QMI
+ *        stalls the clock when DIRECT_RX is full, so it can't overrun.
+ *      - doesn't poll DIRECT_CSR.BUSY before releasing CS. It doesn't need to: the loop only
+ *        exits once the last RX byte has arrived, and that byte can't arrive until the last
+ *        clock has happened.
+ *    What it does NOT do is the one-time rom_connect_internal_flash() + rom_flash_exit_xip()
+ *    above. If the other version's main() called those, carry them over too. If it worked
+ *    without them, the bootrom happened to leave the pads connected after BOOTSEL. Call them
+ *    anyway; it costs nothing, and "happened to" isn't a guarantee.
+ *
+ *    Notes on that:
+ *    - Writing a bare byte to direct_tx means single-wire (IWIDTH=0), 8-bit (DWIDTH=0), push the
+ *      reply into RX (NOPUSH=0). That's exactly 1-1-1 SPI. The upper bits of direct_tx only
+ *      matter if you ever go dual/quad.
+ *    - It's full duplex: every byte out is a byte in. tx and rx must be the same length n. The
+ *      reply sits in rx AFTER the opcode/address/dummy positions (send 0x00 in those tail slots).
+ *    - One call == one CS# low->high == one MRAM instruction. That's the unit everything below
+ *      is built from.
+ *    - Clock: DIRECT_CSR.CLKDIV resets to 6, so ~25 MHz at the default 150 MHz sys clock. That's
+ *      comfortably under every 1-1-1 limit here (50 MHz for the augmented array read is the
+ *      tightest). Leave it alone.
+ *    - The buffers must be real, writable storage: uint8_t arrays / std::array<uint8_t, N>.
+ *      A std::string_view is a read-only view of chars you don't own, so the rx side can't
+ *      go there.
+ *    - mram_xfer() is the SDK's flash_do_cmd_cs() (hardware_flash/flash.c) minus the XIP
+ *      teardown and re-entry. Read that function if you want a known-good reference.
+ *
+ *    Why you don't have to sweat XIP hazards here: pico_set_binary_type(no_flash) means this
+ *    whole program, including the USB stdio IRQ handlers, lives in SRAM. Nothing ever executes
+ *    from the MRAM, so it can sit in plain command mode forever. (Flight code is a different
+ *    animal: there the SRAM call-tree audit from the NVM plan still applies.)
+ *
+ *  1. THE RECIPE FOR EVERY REGISTER WRITE
+ *  --------------------------------------
+ *    Three transactions, i.e. three separate mram_xfer() calls, NOT one combined buffer:
+ *
+ *      a) WREN            tx = { 0x06 }                                   n = 1
+ *      b) the write       tx = { opcode, [addr...], data... }             (see section 2)
+ *      c) wait >= 5 us    busy_wait_us(5);   // tCS2, "Chip Deselect Time after Register Write"
+ *                                            // (AC timing table). Next CS# low must wait.
+ *      d) read it back    (see section 3) and compare. Never trust a register write you
+ *                         didn't read back. That's how you found the BB 88 D3 EA garbage.
+ *
+ *    WREN has to be its own CS# cycle: the chip latches the write-enable when CS# goes HIGH after
+ *    the 06h byte. Glue 06h onto the front of the write buffer and the chip just sees a weird
+ *    instruction. Also note (Table 27, note 1): for REGISTER writes, WREN always resets when CS#
+ *    rises after the write, no matter what CR4.WRENS says. So it's one WREN per register write,
+ *    every time. CR4's SRAM / Back-to-Back modes only affect memory-array and augmented-array
+ *    writes.
+ *
+ *    Sanity check between (a) and (b) if something isn't sticking: RDSR and look at SR[1].
+ *    That's the WREN latch, read-only. 1 = armed.
+ *
+ *  2. THE REGISTER WRITE INSTRUCTIONS (Table 28, "Write Register Instructions")
+ *  ----------------------------------------------------------------------------
+ *    All of these are 1-1-1 (plain single-wire SPI).
+ *
+ *    WRSR  01h: Write Status Register, 1 data byte
+ *              tx = { 0x01, SR }                                          n = 2
+ *
+ *    WRCX  87h: Write CR1, CR2, CR3, CR4 in one shot, 4 data bytes, in that order
+ *              tx = { 0x87, CR1, CR2, CR3, CR4 }                          n = 5
+ *              All-or-nothing: you must supply all four. Read them first (RDCX) if you only
+ *              mean to change one, or use WRAR instead.
+ *
+ *    WRAR  71h: Write Any Register by address. 3 address bytes (MSB first), then data.
+ *              tx = { 0x71, A23..16, A15..8, A7..0, value }               n = 5
+ *              Register addresses (Table 11; register space is separate from the array):
+ *                  SR  = 0x000000     CR1 = 0x000002     CR2 = 0x000003
+ *                  CR3 = 0x000004     CR4 = 0x000005
+ *              This is the one to prefer for poking a single register. The CRn_t::ADDRESS
+ *              constants in include/OwlSat/mram.h are exactly these addresses.
+ *              Table 28 lists 1–8 data bytes, but stick to one byte per WRAR. The SR->CR1
+ *              address gap at 0x000001 makes multi-byte runs a guessing game.
+ *
+ *    WRAP  1Ah: Write Augmented Array Protection register, 1 data byte (see section 4)
+ *              tx = { 0x1A, ASP }                                         n = 2
+ *
+ *    WRSN  C2h: Serial Number register. Leave it alone unless you really mean it
+ *               (SR[6] SNPEN can lock it).
+ *
+ *  3. THE REGISTER READ INSTRUCTIONS (for the read-back in step d)
+ *  ---------------------------------------------------------------
+ *    RDSR  05h   tx = { 0x05, 0 }               -> rx[1] = SR
+ *    RDC1  35h   tx = { 0x35, 0 }               -> rx[1] = CR1
+ *    RDC2  3Fh   tx = { 0x3F, 0 }               -> rx[1] = CR2
+ *    RDC3  44h   tx = { 0x44, 0 }               -> rx[1] = CR3
+ *    RDC4  45h   tx = { 0x45, 0 }               -> rx[1] = CR4
+ *    RDCX  46h   tx = { 0x46, 0, 0, 0, 0 }      -> rx[1..4] = CR1..CR4
+ *    RDAP  14h   tx = { 0x14, 0 }               -> rx[1] = augmented-array protection (ASP)
+ *    RDID  9Fh   tx = { 0x9F, 0, 0, 0, 0 }      -> rx[1..4] = device ID (yours: E6 01 04 01)
+ *    RDAR  65h   tx = { 0x65, A2, A1, A0, DUMMY, 0 }   -> rx[5] = register value
+ *                RDAR needs 8 latency cycles in 1-1-1 mode (Table 25), i.e. one throwaway byte
+ *                between the address and the data. Forget it and every read is shifted by one.
+ *
+ *    Good first milestone before writing anything: RDID and get E6 01 04 01. If that's wrong,
+ *    your mram_xfer() is wrong, and nothing downstream will be right.
+ *
+ *  4. THE AUGMENTED STORAGE ARRAY (ASA)
+ *  ------------------------------------
+ *    256 bytes, completely separate from the 2 MiB main array (its own address space, like the
+ *    registers). Split into 8 sections of 32 bytes (Table 9). Addresses are still sent as
+ *    3 bytes, but ADDR[23:8] must be 0 (Table 28 note 4), so the address is effectively
+ *    { 0x00, 0x00, offset }.
+ *
+ *    Read:   RDASA 4Bh   tx = { 0x4B, 0x00, 0x00, off, DUMMY, 0, 0, ... }   n = 5 + len
+ *                        -> data starts at rx[5]. Needs 8–15 latency cycles in 1-1-1
+ *                        (Table 24), so one dummy byte, same trick as RDAR. Max 50 MHz; you're
+ *                        at ~25.
+ *    Write:  WRASA 42h   tx = { 0x42, 0x00, 0x00, off, d0, d1, ... }        n = 4 + len
+ *                        No dummy byte on writes. 1 to 256 data bytes (Table 28). Keep
+ *                        off + len <= 256; don't rely on it wrapping.
+ *                        After CS# rises: 280 ns minimum deselect (tCS3). Your printf between
+ *                        commands will take care of that on its own.
+ *
+ *    WREN for ASA writes DOES follow CR4.WRENS (unlike registers):
+ *      WRENS = 01 (SRAM, factory default, 0x05 in CR4): no WREN needed.
+ *      WRENS = 00 (Normal, what Config::CR4_DEFAULT = 0x04 would set): WREN before every
+ *                  WRASA.
+ *    Just always send WREN first. It costs one byte and works in every mode.
+ *
+ *    Two protection layers, and either one silently eats your write:
+ *      - CR1.ASPLK (bit 0) = 1: the WHOLE ASA is write-protected.
+ *      - ASP register (RDAP 14h / WRAP 1Ah): bit n = 1 protects section n,
+ *        i.e. bytes [32n, 32n+31]. Table 16.
+ *    To write the ASA: check CR1.ASPLK is 0 and the relevant ASP bit is 0, write, read back,
+ *    then set protection again if you want those bytes to stay put in orbit.
+ *
+ *  5. WHY A WRITE MIGHT "SUCCEED" AND CHANGE NOTHING
+ *  -------------------------------------------------
+ *    The chip doesn't NAK. A blocked write just silently doesn't happen. Suspects, in order:
+ *
+ *    - No WREN, or WREN glued into the same CS# cycle (section 1).
+ *    - CR1.MAPLK (bit 2) = 1 locks SR's TBSEL and BPSEL[2:0]. Your test board currently has
+ *      MAPLK set, so WRSR/WRAR to SR will ignore those bits. MAPLK is plain R/W (Table 20):
+ *      clear it in CR1 first (WREN, write CR1, wait, verify), THEN change SR, THEN re-lock.
+ *    - SR.WP#EN (bit 7) = 1 with the WP# pin low protects SR and all the CRs (Table 15).
+ *    - ASA only: CR1.ASPLK or the section's ASP bit (section 4).
+ *    - Writing CR4 bit 2 as 0. It's reserved-must-be-1 ("may impact device functionality").
+ *      OR CR4::MUST_BE_ONE (0x04) from mram.h into every CR4 value you write.
+ *    - CR2.MLATS only adds latency to memory-array fast reads. It doesn't affect anything in
+ *      this file, but it DOES affect how the flight image boots, so don't fiddle with it here
+ *      and forget.
+ *
+ *  6. USING THE TYPES YOU ALREADY WROTE
+ *  ------------------------------------
+ *    include/OwlSat/mram.h has SR and CR1..CR4 namespaces with bit masks and ::ADDRESS, which
+ *    drop straight into the WRAR/RDAR buffers above. The probe's CMakeLists doesn't see that header yet:
+ *        target_include_directories(MRAM_Probe PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../include)
+ *    (mram.h also includes OwlSat/utility_macros.h, so the whole include/ dir is what you want.)
+ *
+ *    mram.h declares ReadSR() and ReadCR1()..ReadCR4() but no writers. Whatever shape your probe's
+ *    "WREN -> write -> wait 5 us -> read back" helper ends up taking is a good prototype for
+ *    WriteSR(uint8_t) / WriteCR1(uint8_t)..WriteCR4(uint8_t) in the real driver.
+ *
+ *    One thing to double-check while you're in there: Config::CR4_DEFAULT is 0x04 (WRENS =
+ *    Normal), but the datasheet factory default is 0x05 (WRENS = SRAM mode), which is what your
+ *    readback showed. If Normal is a deliberate flight choice, great. Just make sure it's a
+ *    decision and not a typo.
+ *
+ * ============================================================================================
+ */

@@ -74,6 +74,7 @@ pico_set_program_version(OwlSatOS "0.1")
 target_link_libraries(OwlSatOS #PRIVATE
         pico_stdlib
         hardware_pwm
+        hardware_flash
         FreeRTOS-Kernel-Core
         FreeRTOS-Kernel-Heap4
 )
@@ -89,3 +90,22 @@ target_include_directories(OwlSatOS PRIVATE
         include/)
 
 pico_add_extra_outputs(OwlSatOS)
+
+# Bench-only MRAM interface-mode probe (docs/mram_mode_probe.md). Loaded into SRAM over BOOTSEL and
+# never written to the MRAM. Shares the MRAM driver with the flight image.
+file(GLOB MRAM_Probe_SOURCES CONFIGURE_DEPENDS mram-probe/src/*.cpp mram-probe/src/*.c)
+add_executable(MRAM_Probe ${MRAM_Probe_SOURCES} src/mram_transactions.cpp)
+
+target_link_libraries(MRAM_Probe pico_stdlib pico_bootrom hardware_watchdog)
+
+pico_set_binary_type(MRAM_Probe no_flash)      # runs from SRAM, never touches the MRAM for booting
+pico_enable_stdio_usb(MRAM_Probe 1)
+pico_enable_stdio_uart(MRAM_Probe 0)
+pico_add_extra_outputs(MRAM_Probe)
+
+target_include_directories(MRAM_Probe PRIVATE
+        ./
+        ${CMAKE_CURRENT_LIST_DIR}
+        include/
+)
+
