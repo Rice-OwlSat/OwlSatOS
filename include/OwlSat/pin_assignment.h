@@ -50,15 +50,16 @@
 // ---------------------------------------------------------------------------
 // Bus instances
 //
-// These three stay macros. The SDK's spi0 and uart0 are integer-to-pointer casts of the register
-// block addresses, which cannot appear in a constant expression, and all three expand only where
+// These stay macros. The SDK's spi0 and uart0 are integer-to-pointer casts of the register
+// block addresses, which cannot appear in a constant expression, and all of them expand only where
 // a driver has already included the matching hardware/ header. Everything else in this file is a
 // constexpr in OwlSat::Pins.
 // ---------------------------------------------------------------------------
 
 #define OWLSAT_I2C0  i2c0  ///< Board-wide sensor I2C instance.
 #define OWLSAT_SPI0  spi0  ///< Board-wide SPI instance: CAN controller and magnetorquer.
-#define OWLSAT_UART0 uart0 ///< GPS serial instance.
+#define OWLSAT_UART0 uart0 ///< Debug console serial instance.
+#define OWLSAT_UART1 uart1 ///< GNSS (Orion B16-C) serial instance. Pins in gnss_config.h until the harness is drawn.
 
 namespace OwlSat::Pins {
 
@@ -119,8 +120,8 @@ namespace OwlSat::Pins {
   inline constexpr Pin SPI0_SCK  = 18; ///< SPI0 clock.
   inline constexpr Pin SPI0_MOSI = 19; ///< SPI0 TX.
 
-  inline constexpr Pin UART0_TX = 12; ///< UART0 TX — FC to GPS.
-  inline constexpr Pin UART0_RX = 13; ///< UART0 RX — GPS to FC.
+  inline constexpr Pin UART0_TX = 12; ///< UART0 TX — debug console. Placeholder; bench builds use the SDK default GP0.
+  inline constexpr Pin UART0_RX = 13; ///< UART0 RX — debug console. Placeholder; bench builds use the SDK default GP1.
 
 
   // ---------------------------------------------------------------------------
@@ -294,6 +295,7 @@ namespace OwlSat::Pins {
   //   I2C0  SDA 0,4,8,12,16,20,24,28   SCL 1,5,9,13,17,21,25,29
   //   SPI0  RX  0,4,16,20   SCK 2,6,18,22   TX 3,7,19,23
   //   UART0 TX  0,12,16,28  RX  1,13,17,29
+  //   UART1 TX  4,8,20,24   RX  5,9,21,25
   // Chip selects and every signal in the digital groups above are plain GPIO and may go anywhere.
   // ---------------------------------------------------------------------------
 

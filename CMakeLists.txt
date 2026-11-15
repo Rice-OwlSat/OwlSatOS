@@ -89,3 +89,15 @@ target_include_directories(OwlSatOS PRIVATE
         include/)
 
 pico_add_extra_outputs(OwlSatOS)
+
+# Bench-only GNSS driver test (gnss-test/src/gnss_test.cpp). Runs from SRAM and never touches the
+# flash. stdio is on UART0 (GP0 TX / GP1 RX, 115200) for the debug probe, and the Orion is on UART1
+# (pins in include/OwlSat/gnss_config.h).
+add_executable(GNSS_Test gnss-test/src/gnss_test.cpp src/gnss.cpp)
+target_link_libraries(GNSS_Test pico_stdlib)
+target_include_directories(GNSS_Test PRIVATE include/)
+
+pico_set_binary_type(GNSS_Test no_flash)
+pico_enable_stdio_usb(GNSS_Test 0)
+pico_enable_stdio_uart(GNSS_Test 1)
+pico_add_extra_outputs(GNSS_Test)
