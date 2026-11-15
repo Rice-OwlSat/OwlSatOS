@@ -252,4 +252,26 @@ namespace OwlSat::Config {
     inline constexpr uint32_t TEST_TASK_STACK_WORDS = 2048;
   } // namespace MRAMTest
 
+  /*!
+   * Pre-flight storage mode: the state the MRAM_Preflight bench binary (mram-preflight/) leaves the
+   * chip in before the board is put away for launch. Not used by the flight image.
+   *
+   * Provisional, and expected to change as the pre-launch state is decided. Today it is the flight
+   * register configuration and nothing else.
+   */
+  namespace MRAMPreflight {
+    /*!
+     * Registers to write, in order, each verified against its mask. Starts as the flight set; replace
+     * it with a table of its own when the two diverge.
+     *
+     * Order matters if SR is ever added: CR1.MAPLK locks SR.TBSEL/BPSEL, so SR has to come before
+     * any entry that sets MAPLK, or its write will not verify.
+     */
+    inline constexpr auto &REGISTERS = MRAMActiveSettings::FLIGHT_DEFAULTS;
+
+    /// Scratch area for the after-the-fact write check. Saved first and restored, so nothing changes
+    inline constexpr uint32_t SCRATCH_ADDRESS = MRAMTest::WRITE_ADDRESS;
+    inline constexpr size_t SCRATCH_LENGTH = MRAMTest::WRITE_LENGTH;
+  } // namespace MRAMPreflight
+
 } // namespace OwlSat::Config

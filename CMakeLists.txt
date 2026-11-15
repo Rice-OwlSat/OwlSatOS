@@ -136,6 +136,16 @@ foreach(MRAM_TEST_VARIANT IN ITEMS Read Write)
     pico_add_extra_outputs(${MRAM_TEST_TARGET})
 endforeach()
 
+# Bench-only: puts the MRAM into pre-flight storage mode (Config::MRAMPreflight) and verifies it.
+# SRAM-only, stdio on UART0 for the debug probe. Writes nonvolatile registers; idempotent.
+add_executable(MRAM_Preflight mram-preflight/src/mram_preflight.cpp src/mram.cpp src/mram_transactions.cpp)
+target_link_libraries(MRAM_Preflight pico_stdlib pico_bootrom)
+target_include_directories(MRAM_Preflight PRIVATE include/)
+pico_set_binary_type(MRAM_Preflight no_flash)
+pico_enable_stdio_usb(MRAM_Preflight 0)
+pico_enable_stdio_uart(MRAM_Preflight 1)
+pico_add_extra_outputs(MRAM_Preflight)
+
 # The same suite from a FreeRTOS task in an image that executes from the MRAM, through the driver's
 # XIP sessions. Flashing it REPLACES the image in the bottom of the MRAM (e.g. blinky).
 add_executable(MRAM_Test_XIP mram-test/src/mram_api_test.cpp src/mram.cpp src/mram_transactions.cpp)
