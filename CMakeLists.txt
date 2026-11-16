@@ -61,6 +61,9 @@ project(OwlSatOS C CXX ASM)
 
 pico_sdk_init()
 
+# owlsat_debug_usb_reset(): picotool can reboot a running Debug build without the BOOTSEL button
+include(cmake/debug_usb_reset.cmake)
+
 # CONFIGURE_DEPENDS makes the build system re-run the glob on every build, so adding a file to
 # src/ picks it up without a manual re-configure. Without it, a new source silently does not
 # compile and surfaces as an undefined reference at link time.
@@ -80,6 +83,7 @@ target_link_libraries(OwlSatOS #PRIVATE
 
 pico_enable_stdio_usb(OwlSatOS 1)
 pico_enable_stdio_uart(OwlSatOS 0)
+owlsat_debug_usb_reset(OwlSatOS)
 
 target_include_directories(OwlSatOS PRIVATE
         ./
