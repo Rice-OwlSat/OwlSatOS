@@ -1,24 +1,35 @@
 /**
 
   @file       gnss.h
-  @brief      GNSS receiver driver: fixed-length NMEA chunks from the Orion B16-C over UART1.
-  @details    The Orion streams NMEA-0183 sentences ($aaccc,...*hh<CR><LF>) at 115200 8N1 with
-              no configuration. This driver does one thing. It hands back Config::GNSS::READ_LENGTH
-              raw bytes that start at the beginning of a sentence. It does not parse anything, and
-              it never sends anything to the receiver.
+  @brief      GNSS receiver driver: one fixed-length binary navigation message from the Orion
+              B16-C over UART1.
+  @details    The Orion powers up streaming NMEA-0183. Configure() switches it to the SkyTraq
+              binary protocol (application note AN0037), and Read() then hands back one Navigation
+              Data Message (ID 0xA8) as a whole frame. That frame is always the same length:
 
-              Not handled here: powering the receiver (GPS_PWR), sharing the UART between tasks,
-              and SkyTraq binary commands.
+              @code
+              A0 A1 | PL (2, big-endian) | payload (PL bytes, message ID first) | CS | 0D 0A
+              @endcode
+
+              CS is the XOR of the payload bytes. For 0xA8, PL is 59, so the frame is 66 bytes.
+              Read() checks the framing and the checksum but does not decode any fields. Multi-byte
+              fields inside the payload are big-endian.
+
+              Configure() writes the receiver's SRAM only, never its flash, so the receiver is back
+              to NMEA after a power cycle and Configure() has to be called again.
+
+              Not handled here: powering the receiver (GPS_PWR) and sharing the UART between tasks.
 
               @par Threading and timing
               Pure pico-sdk with no FreeRTOS dependency. Read() polls the UART until a deadline, so
-              it occupies its caller for up to Config::GNSS::READ_TIMEOUT_MS. The RX FIFO holds 32
-              bytes, about 2.7 ms at 115200. If the caller is preempted for longer than that partway
-              through a chunk, the FIFO overruns and Read() returns Result::LineError rather than a
-              chunk with bytes missing. Call it from one task only, never from an ISR.
+              it occupies its caller for up to Config::GNSS::READ_TIMEOUT_MS, and Configure() for up
+              to two Config::GNSS::ACK_TIMEOUT_MS. The RX FIFO holds 32 bytes, about 2.7 ms at
+              115200. If the caller is preempted for longer than that partway through a frame, the
+              FIFO overruns and the call returns Result::LineError rather than a frame with bytes
+              missing. Call both from one task only, never from an ISR.
 
   @author     Viola Case
-  @date       15.11.2026
+  @date       16.11.2026
   @copyright  © Viola Case, 2026. All rights reserved.
 
 **/
@@ -26,50 +37,77 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <span>
 
 #include <OwlSat/gnss_config.h>
 
 namespace OwlSat::GNSS {
 
   /*!
-   * Outcome of Read().
+   * Outcome of Configure() and Read().
    */
   enum struct Result : uint8_t {
-    Ok,             //!< The chunk is full and starts with '$'
+    Ok,             //!< Read(): the frame is complete and its checksum matches. Configure(): every command was ACKed
     NotInitialised, //!< Init() hasn't succeeded
-    NoSentence,     //!< No '$' arrived before the deadline. The receiver is silent, unpowered or not wired
-    Incomplete,     //!< Synced on '$', but the chunk didn't fill before the deadline
-    LineError,      //!< Framing, parity, break or overrun error after sync. Bytes may be missing
+    NoMessage,      //!< Nothing usable before the deadline: no navigation message (Read) or no ACK/NACK (Configure)
+    Incomplete,     //!< A frame started, but didn't finish before the deadline
+    LineError,      //!< Framing, parity, break or overrun error inside a frame. Bytes may be missing
+    BadFrame,       //!< The navigation message arrived with a wrong checksum or end sequence
+    Rejected,       //!< Configure(): the receiver answered a command with NACK
   };
 
   /*!
    * @brief   Names a Result, for logs.
    * @param   result  The result to name
-   * @return  The enumerator's name, e.g. "NoSentence"
+   * @return  The enumerator's name, e.g. "NoMessage"
    */
   const char *ResultName(Result result);
 
-  /// One chunk: READ_LENGTH raw bytes, starting with '$'. Not NUL-terminated.
-  using Chunk = std::array<uint8_t, Config::GNSS::READ_LENGTH>;
+  inline constexpr size_t FRAME_OVERHEAD = 7; //!< A0 A1, two length bytes, checksum, 0D 0A
+  inline constexpr size_t PAYLOAD_OFFSET = 4; //!< Index of the message ID, the first payload byte, in a frame
+  inline constexpr size_t FRAME_LENGTH = Config::GNSS::PAYLOAD_LENGTH + FRAME_OVERHEAD;
+
+  /// One whole navigation message frame, from the A0 A1 start sequence to the 0D 0A end sequence
+  using Frame = std::array<uint8_t, FRAME_LENGTH>;
 
   /*!
-   * @brief   Brings up OWLSAT_GNSS_UART at Config::GNSS::BAUD, 8N1, and muxes only the RX pin.
-   * @details Doesn't touch the TX pin. See Config::GNSS::UART_TX for why. Can't tell whether a
-   *          receiver is there, because that takes listening, which Read() does.
-   * @return  False if Config::GNSS::UART_RX is unassigned.
+   * @brief   Brings up OWLSAT_GNSS_UART at Config::GNSS::BAUD, 8N1, and muxes the RX pin.
+   * @details Sends nothing. The TX pin becomes a pulled-up input (see Config::GNSS::UART_TX).
+   *          Can't tell whether a receiver is there. Configure() does that.
+   * @return  False if Config::GNSS::UART_RX or UART_TX is unassigned.
    */
   bool Init();
 
   /*!
-   * @brief   Reads one chunk of NMEA output.
+   * @brief   Switches the receiver to binary output and turns the navigation message on.
+   * @details Sends two AN0037 commands and waits for the ACK to each:
+   *          1. Configure Message Type (0x09): binary.
+   *          2. Configure Navigation Data Message Interval (0x64 / 0x2F): Config::GNSS::MESSAGE_INTERVAL_S.
+   *          Both update SRAM only. Drives the TX pin while sending, so **call it only while the
+   *          receiver is powered**, and again after every receiver power cycle.
+   * @return  Result::Ok if both were ACKed. Result::Rejected on a NACK. Otherwise why no answer arrived
+   */
+  Result Configure();
+
+  /*!
+   * @brief   Reads the next navigation message.
    * @details 1. Throws away whatever is in the RX FIFO and clears the error flags. It's stale and
    *             has probably overrun.
-   *          2. Waits for the next '$'.
-   *          3. Fills the rest of the chunk with the bytes that follow.
+   *          2. Waits for the next frame carrying Config::GNSS::MESSAGE_ID, skipping every other
+   *             message and any NMEA.
+   *          3. Checks its end sequence and checksum.
    *          All of it runs against one deadline, Config::GNSS::READ_TIMEOUT_MS from the call.
    * @param   out  Filled only on Result::Ok, untouched otherwise
-   * @return  Result::Ok, or why there's no chunk
+   * @return  Result::Ok, or why there's no frame
    */
-  Result Read(Chunk &out);
+  Result Read(Frame &out);
+
+  /*!
+   * @brief   Checks a whole binary frame: start sequence, length field, checksum and end sequence.
+   * @details Pure, touches no hardware. Read() uses it on every frame.
+   * @param   frame  The frame, A0 A1 through 0D 0A, with nothing before or after
+   * @return  True if the frame is well formed
+   */
+  bool IsValidFrame(std::span<const uint8_t> frame);
 
 } // namespace OwlSat::GNSS
